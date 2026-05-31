@@ -24,14 +24,14 @@ Install through your Claude Code marketplace if this plugin is registered.
 Copy this directory to your Claude plugin path:
 
 ```bash
-cp -R claude-tedlink ~/.claude/plugins/tedlink
+cp -R tedlink ~/.claude/plugins/tedlink
 ```
 
 Or copy the skill to a project workspace:
 
 ```bash
 mkdir -p /your/project/.claude/skills
-cp -R claude-tedlink/skills/ted-link /your/project/.claude/skills/
+cp -R tedlink/skills/ted-link /your/project/.claude/skills/
 ```
 
 ## Usage in Claude
