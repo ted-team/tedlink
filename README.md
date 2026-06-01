@@ -70,4 +70,4 @@ See `.claude-plugin/plugin.json`.
 
 ## License
 
-UNLICENSED
+MIT
