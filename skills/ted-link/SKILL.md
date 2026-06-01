@@ -1,6 +1,6 @@
 ---
 name: ted-link
-description: Use TED through the bundled tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, tedlink, or /tedlink.
+description: Use TED through the bundled tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
 scope: client
 argument-hint: --prompt "task" [--dir PATH]
 ---
@@ -9,11 +9,11 @@ argument-hint: --prompt "task" [--dir PATH]
 
 Use this skill when the user asks for circuit design work, or explicitly asks Claude to use TED/TedLink. The client presents the work as a local long-running task: start one `tedlink --prompt ...` process in the background, keep a live stdout listener attached, and let the process continue until it exits.
 
-Submit the user's task prompt verbatim. Do not expand, rewrite, optimize, translate, summarize, add requirements to, or otherwise modify the user's prompt before passing it to `--prompt`, `--prompt-file`, or `--prompt-stdin`. Only remove the explicit TedLink invocation marker itself when necessary, such as `/tedlink` or a direct skill mention, and preserve the remaining task text exactly.
-
 Do not split the work into separate start/query commands in the conversation. Do not ask the user to run progress checks. Do not create a supervisor agent. The CLI owns persistence, progress tracking, result file writing, and cleanup. The agent owns only local process supervision: starting the CLI, listening to stdout, and reporting meaningful progress to the user. The agent must keep the foreground conversation active with TedLink progress summaries; do not silently wait for the CLI to finish. Treat CLI recovery files as internal implementation details; do not inspect or describe them unless debugging the CLI itself.
 
-Run the bundled client through a resolved `tedlink_bin` path. On macOS, use `tedlink-osx`; on other systems, use `tedlink`. Never hand-write or guess a Claude plugin cache path such as `~/.claude/plugins/cache/ted/tedlink/0.1.0/...`; cache layouts and versions change. Always resolve the binary by checking known install roots and executable files before starting the task.
+The client reads the TedLink base URL from `TEDLINK_BASE_URL`, or uses `http://49.232.144.199:9543` if unset. If the TedLink endpoint is elsewhere, set `TEDLINK_BASE_URL` in the environment before running the CLI. Do not pass the service URL as a CLI argument.
+
+Run the bundled client through a resolved `tedlink_bin` path. On macOS, use `tedlink-osx`; on other systems, use `tedlink`. Search the user's installed Claude plugin cache under `$HOME/.claude/plugins/cache/` first, because marketplace-installed plugins normally run from the user cache and guessing another path can make the agent miss the executable. Then fall back to `$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/`, `.claude/skills/ted-link/bin/`, and `skills/ted-link/bin/`. Do not hard-code a single cache version or layout; resolve the binary before starting the task.
 
 ## Required Workflow
 
@@ -25,35 +25,21 @@ case "$(uname -s)" in
   *) tedlink_name="tedlink" ;;
 esac
 
-tedlink_candidates=()
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  tedlink_candidates+=("$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name")
-fi
-tedlink_candidates+=(
-  ".claude/skills/ted-link/bin/$tedlink_name"
-  "skills/ted-link/bin/$tedlink_name"
-)
-if [ -d "$HOME/.claude/plugins/cache" ]; then
-  while IFS= read -r candidate; do
-    tedlink_candidates+=("$candidate")
-  done < <(find "$HOME/.claude/plugins/cache" -path "*/skills/ted-link/bin/$tedlink_name" -type f 2>/dev/null | sort -r)
-fi
-
 tedlink_bin=""
-for candidate in "${tedlink_candidates[@]}"; do
-  if [ -f "$candidate" ] && [ ! -x "$candidate" ]; then
-    chmod +x "$candidate" 2>/dev/null || true
-  fi
-  if [ -x "$candidate" ]; then
-    tedlink_bin="$candidate"
-    break
-  fi
-done
+if [ -d "$HOME/.claude/plugins/cache" ]; then
+  tedlink_bin="$(find "$HOME/.claude/plugins/cache" -path "*/skills/ted-link/bin/$tedlink_name" -type f -perm -111 2>/dev/null | sort -r | head -n 1)"
+fi
 
-if [ -z "$tedlink_bin" ]; then
-  echo "Cannot find executable bundled $tedlink_name client" >&2
-  printf 'Checked candidates:\n' >&2
-  printf '  %s\n' "${tedlink_candidates[@]}" >&2
+if [ -n "$tedlink_bin" ]; then
+  :
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name" ]; then
+  tedlink_bin="$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name"
+elif [ -x ".claude/skills/ted-link/bin/$tedlink_name" ]; then
+  tedlink_bin=".claude/skills/ted-link/bin/$tedlink_name"
+elif [ -x "skills/ted-link/bin/$tedlink_name" ]; then
+  tedlink_bin="skills/ted-link/bin/$tedlink_name"
+else
+  echo "Cannot find bundled $tedlink_name client" >&2
   exit 127
 fi
 
@@ -111,7 +97,9 @@ fi
 
 The CLI will resume the existing task when possible, keep streaming stdout, and still write final files when the task reaches `completed`, `failed`, or `cancelled`.
 
-8. After the CLI exits, report the final state, exit code if nonzero, and any written result files to the user. Always tell the user the result folder as an explicit absolute path. Do not report only a relative path such as `.tedlink/<prompt-summary>/`. If the client prints a relative result folder, resolve it against the workspace before replying, for example with `result_dir_abs="$(cd "$result_dir" && pwd -P)"`. By default, delivered files are written under the user's workspace at `.tedlink/<prompt-summary>/`, where `<prompt-summary>` is generated by the TedLink server agent and returned to the client as session metadata. The client must not derive this folder name from the complete user prompt. The `artifacts/` folder and returned `report.md` / `result.json` files must be placed inside that result folder unless the user explicitly supplied `--output-dir`.
+8. After the CLI exits, report the final state, exit code if nonzero, and any written result files to the user.
+
+Local session recovery rule: the CLI keeps a local recovery marker for the current directory. Running `tedlink --dir .` without a prompt resumes the existing task. Running `tedlink --prompt ... --dir .` resumes only when the supplied prompt matches the stored task prompt after whitespace normalization; a different prompt starts a new task and replaces the local recovery marker. If the user wants to rerun the same prompt as a fresh task, pass `--new` together with the prompt. Do not delete or edit the recovery marker unless debugging TedLink itself.
 
 For long prompts, use `--prompt-file request.md` instead of `--prompt`.
 
@@ -166,6 +154,7 @@ TED tasks may exceed 15 minutes. Do not treat a long-running non-terminal task a
 - `--shared-dir PATH`: additional files to send as shared input when starting the task.
 - `--output-dir PATH`: where returned result files should be written.
 - `--session-id ID`: reuse or name a task session when starting.
+- `--new`: force a fresh task for the supplied prompt even if the current directory has a matching recoverable task.
 - `--prompt-file PATH`: read the task prompt from a file.
 - `--prompt-stdin`: read the task prompt from stdin.
 - `--upload-workspace`: send current workspace files with the task.
