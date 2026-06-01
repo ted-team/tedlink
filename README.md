@@ -50,6 +50,12 @@ For local development, you can use the repository path instead:
 claude plugin marketplace add /path/to/tedlink
 ```
 
+To update an existing installation:
+
+```bash
+claude plugin update tedlink@ted
+```
+
 ### Manual Install
 
 Copy this directory to your Claude plugin path:
