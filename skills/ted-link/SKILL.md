@@ -1,6 +1,7 @@
 ---
 name: ted-link
-description: Use TED through the bundled tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
+description: Use TED through the npm-installed tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
+version: 0.1.4
 scope: client
 argument-hint: --prompt "task" [--dir PATH]
 ---
@@ -9,37 +10,42 @@ argument-hint: --prompt "task" [--dir PATH]
 
 Use this skill when the user asks for circuit design work, or explicitly asks Claude to use TED/TedLink. The client presents the work as a local long-running task: start one `tedlink --prompt ...` process in the background, keep a live stdout listener attached, and let the process continue until it exits.
 
+## Version Binding
+
+This `SKILL.md` is version-bound to the TedLink plugin and CLI versions below:
+
+| Component | Version | Binding note |
+| --- | --- | --- |
+| `ted-link` skill (`SKILL.md`) | `0.1.4` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
+| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.4` | Plugin package version that carries this skill. |
+| TedLink CLI (`tedlink --version`) | `0.1.0` | Installed client version this skill workflow is written against. |
+
+Update this table whenever either the skill/plugin version or the TedLink CLI version changes. A mismatch means the instructions in this skill may no longer match the installed client behavior.
+
 Do not split the work into separate start/query commands in the conversation. Do not ask the user to run progress checks. Do not create a supervisor agent. The CLI owns persistence, progress tracking, result file writing, and cleanup. The agent owns only local process supervision: starting the CLI, listening to stdout, and reporting meaningful progress to the user. The agent must keep the foreground conversation active with TedLink progress summaries; do not silently wait for the CLI to finish. Treat CLI recovery files as internal implementation details; do not inspect or describe them unless debugging the CLI itself.
 
-The client reads the TedLink base URL from `TEDLINK_BASE_URL`, or uses `http://49.232.144.199:9543` if unset. If the TedLink endpoint is elsewhere, set `TEDLINK_BASE_URL` in the environment before running the CLI. Do not pass the service URL as a CLI argument.
+TedLink is not bundled with this skill. Install the CLI from npm before use:
 
-Run the bundled client through a resolved `tedlink_bin` path. On macOS, use `tedlink-osx`; on other systems, use `tedlink`. Search the user's installed Claude plugin cache under `$HOME/.claude/plugins/cache/` first, because marketplace-installed plugins normally run from the user cache and guessing another path can make the agent miss the executable. Then fall back to `$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/`, `.claude/skills/ted-link/bin/`, and `skills/ted-link/bin/`. Do not hard-code a single cache version or layout; resolve the binary before starting the task.
+```bash
+npm install -g tedlink-cli
+```
+
+For users in China, use the npmmirror registry:
+
+```bash
+npm install -g tedlink-cli --registry=https://registry.npmmirror.com
+```
+
+The npm package installs the `tedlink` executable. Always run `tedlink` from `PATH`; do not look for `skills/ted-link/bin/tedlink`, `skills/ted-link/bin/tedlink-osx`, or any other bundled binary path.
 
 ## Required Workflow
 
 1. Start the CLI in the background and immediately attach a live stdout listener. Prefer a shell session that remains open so the agent can read stdout as it arrives. Use this pattern:
 
 ```bash
-case "$(uname -s)" in
-  Darwin) tedlink_name="tedlink-osx" ;;
-  *) tedlink_name="tedlink" ;;
-esac
-
-tedlink_bin=""
-if [ -d "$HOME/.claude/plugins/cache" ]; then
-  tedlink_bin="$(find "$HOME/.claude/plugins/cache" -path "*/skills/ted-link/bin/$tedlink_name" -type f -perm -111 2>/dev/null | sort -r | head -n 1)"
-fi
-
-if [ -n "$tedlink_bin" ]; then
-  :
-elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name" ]; then
-  tedlink_bin="$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name"
-elif [ -x ".claude/skills/ted-link/bin/$tedlink_name" ]; then
-  tedlink_bin=".claude/skills/ted-link/bin/$tedlink_name"
-elif [ -x "skills/ted-link/bin/$tedlink_name" ]; then
-  tedlink_bin="skills/ted-link/bin/$tedlink_name"
-else
-  echo "Cannot find bundled $tedlink_name client" >&2
+if ! command -v tedlink >/dev/null 2>&1; then
+  echo "Cannot find tedlink. Install it with: npm install -g tedlink-cli" >&2
+  echo "China mirror: npm install -g tedlink-cli --registry=https://registry.npmmirror.com" >&2
   exit 127
 fi
 
@@ -47,13 +53,17 @@ run_dir=".tedlink/runs/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$run_dir"
 
 (
-  stdbuf -oL -eL "$tedlink_bin" \
-    --prompt "生成一个满足 60dB 增益的 OTA，并交付报告和仿真结果" \
-    --dir . \
-    >"$run_dir/stdout.log" \
-    2>"$run_dir/stderr.log"
+  if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL -eL tedlink \
+      --prompt "生成一个满足 60dB 增益的 OTA，并交付报告和仿真结果" \
+      --dir .
+  else
+    tedlink \
+      --prompt "生成一个满足 60dB 增益的 OTA，并交付报告和仿真结果" \
+      --dir .
+  fi
   printf '%s\n' "$?" >"$run_dir/exit_code"
-) &
+) >"$run_dir/stdout.log" 2>"$run_dir/stderr.log" &
 tedlink_pid=$!
 printf '%s\n' "$tedlink_pid" >"$run_dir/pid"
 printf 'TedLink started: pid=%s run_dir=%s\n' "$tedlink_pid" "$run_dir"
@@ -92,7 +102,7 @@ fi
 7. If the CLI process itself was killed by the environment or the conversation runtime before completion, rerun the same background-listener command. If the original prompt is unavailable, run the same pattern with:
 
 ```bash
-"$tedlink_bin" --dir .
+tedlink --dir .
 ```
 
 The CLI will resume the existing task when possible, keep streaming stdout, and still write final files when the task reaches `completed`, `failed`, or `cancelled`.

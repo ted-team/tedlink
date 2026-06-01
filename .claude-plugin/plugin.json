@@ -1,7 +1,7 @@
 {
   "name": "tedlink",
-  "description": "TedLink client plugin for Claude Code. Provides the ted-link skill and bundled CLI for long-running analog/mixed-signal circuit design tasks via TED.",
-  "version": "0.1.3",
+  "description": "TedLink client plugin for Claude Code. Provides the ted-link skill for the npm-installed TedLink CLI for long-running analog/mixed-signal circuit design tasks via TED.",
+  "version": "0.1.4",
   "author": {
     "name": "TED Team",
     "email": "zuochang@tsinghua.edu.cn"
