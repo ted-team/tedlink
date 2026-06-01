@@ -13,7 +13,7 @@ Submit the user's task prompt verbatim. Do not expand, rewrite, optimize, transl
 
 Do not split the work into separate start/query commands in the conversation. Do not ask the user to run progress checks. Do not create a supervisor agent. The CLI owns persistence, progress tracking, result file writing, and cleanup. The agent owns only local process supervision: starting the CLI, listening to stdout, and reporting meaningful progress to the user. The agent must keep the foreground conversation active with TedLink progress summaries; do not silently wait for the CLI to finish. Treat CLI recovery files as internal implementation details; do not inspect or describe them unless debugging the CLI itself.
 
-Run the bundled client through a resolved `tedlink_bin` path. On macOS, use `tedlink-osx`; on other systems, use `tedlink`. In Claude plugin installs, prefer `$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/`; in this demo workspace, `.claude/skills` is a symlink to `skills`, so `.claude/skills/ted-link/bin/` also works. Do not hard-code only one layout; resolve the binary before starting the task.
+Run the bundled client through a resolved `tedlink_bin` path. On macOS, use `tedlink-osx`; on other systems, use `tedlink`. Never hand-write or guess a Claude plugin cache path such as `~/.claude/plugins/cache/ted/tedlink/0.1.0/...`; cache layouts and versions change. Always resolve the binary by checking known install roots and executable files before starting the task.
 
 ## Required Workflow
 
@@ -25,14 +25,35 @@ case "$(uname -s)" in
   *) tedlink_name="tedlink" ;;
 esac
 
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name" ]; then
-  tedlink_bin="$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name"
-elif [ -x ".claude/skills/ted-link/bin/$tedlink_name" ]; then
-  tedlink_bin=".claude/skills/ted-link/bin/$tedlink_name"
-elif [ -x "skills/ted-link/bin/$tedlink_name" ]; then
-  tedlink_bin="skills/ted-link/bin/$tedlink_name"
-else
-  echo "Cannot find bundled $tedlink_name client" >&2
+tedlink_candidates=()
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  tedlink_candidates+=("$CLAUDE_PLUGIN_ROOT/skills/ted-link/bin/$tedlink_name")
+fi
+tedlink_candidates+=(
+  ".claude/skills/ted-link/bin/$tedlink_name"
+  "skills/ted-link/bin/$tedlink_name"
+)
+if [ -d "$HOME/.claude/plugins/cache" ]; then
+  while IFS= read -r candidate; do
+    tedlink_candidates+=("$candidate")
+  done < <(find "$HOME/.claude/plugins/cache" -path "*/skills/ted-link/bin/$tedlink_name" -type f 2>/dev/null | sort -r)
+fi
+
+tedlink_bin=""
+for candidate in "${tedlink_candidates[@]}"; do
+  if [ -f "$candidate" ] && [ ! -x "$candidate" ]; then
+    chmod +x "$candidate" 2>/dev/null || true
+  fi
+  if [ -x "$candidate" ]; then
+    tedlink_bin="$candidate"
+    break
+  fi
+done
+
+if [ -z "$tedlink_bin" ]; then
+  echo "Cannot find executable bundled $tedlink_name client" >&2
+  printf 'Checked candidates:\n' >&2
+  printf '  %s\n' "${tedlink_candidates[@]}" >&2
   exit 127
 fi
 
