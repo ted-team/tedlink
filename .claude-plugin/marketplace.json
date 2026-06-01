@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ted",
+  "description": "TedLink Claude Code plugin marketplace",
+  "owner": {
+    "name": "TED Team",
+    "email": "zuochang@tsinghua.edu.cn"
+  },
+  "plugins": [
+    {
+      "name": "tedlink",
+      "description": "TedLink client plugin for Claude Code. Provides the ted-link skill and bundled CLI for long-running analog/mixed-signal circuit design tasks via TED.",
+      "author": {
+        "name": "TED Team",
+        "email": "zuochang@tsinghua.edu.cn"
+      },
+      "category": "development",
+      "source": "./",
+      "homepage": "https://github.com/ted-team/tedlink"
+    }
+  ]
+}

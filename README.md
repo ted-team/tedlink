@@ -17,7 +17,25 @@ Claude Code plugin that provides the `ted-link` skill for long-running circuit d
 
 ### Via Marketplace
 
-Install through your Claude Code marketplace if this plugin is registered.
+Register this repository as a Claude Code marketplace, then install the plugin:
+
+```text
+/plugin marketplace add https://github.com/ted-team/tedlink
+/plugin install tedlink@ted
+```
+
+Equivalent CLI commands:
+
+```bash
+claude plugin marketplace add https://github.com/ted-team/tedlink
+claude plugin install tedlink@ted
+```
+
+For local development, you can use the repository path instead:
+
+```bash
+claude plugin marketplace add /path/to/tedlink
+```
 
 ### Manual Install
 
