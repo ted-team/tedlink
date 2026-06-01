@@ -31,6 +31,19 @@ claude plugin marketplace add https://github.com/ted-team/tedlink
 claude plugin install tedlink@ted
 ```
 
+For users in China, the Gitee mirror is recommended:
+
+```text
+/plugin marketplace add https://gitee.com/ted-team/tedlink
+/plugin install tedlink@ted
+```
+
+Equivalent CLI command:
+
+```bash
+claude plugin marketplace add https://gitee.com/ted-team/tedlink
+```
+
 For local development, you can use the repository path instead:
 
 ```bash
