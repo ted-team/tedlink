@@ -5,26 +5,33 @@ Claude Code plugin that provides the `ted-link` skill for long-running circuit d
 ## What's Included
 
 - **`skills/ted-link/SKILL.md`** — Claude skill definition with workflow instructions
+- **`skills/ted-link/tedlink-cli/`** — Bundled TedLink CLI source used for local installation
 
 ## Prerequisites
 
 - Claude Code installed and `claude` available in PATH
-- Node.js/npm available for installing the TedLink CLI
-- TedLink CLI installed globally:
+- Node.js/npm available for installing the bundled TedLink CLI source
+- TedLink CLI installed globally from this repository:
 
 ```bash
-npm install -g tedlink-cli
+npm install -g ./skills/ted-link/tedlink-cli
 ```
 
-For users in China, use the npmmirror registry:
+If the bundled source directory is unavailable, install the matching published CLI version:
 
 ```bash
-npm install -g tedlink-cli --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@0.1.2
+```
+
+For users in China, use the npmmirror registry for that fallback:
+
+```bash
+npm install -g tedlink-cli@0.1.2 --registry=https://registry.npmmirror.com
 ```
 
 - Environment configured for the TedLink client (`TEDLINK_TOKEN`)
 
-The npm package installs the `tedlink` executable. This plugin does not bundle platform-specific `tedlink` or `tedlink-osx` binaries.
+The local or npm package installs the `tedlink` executable. This plugin does not bundle platform-specific `tedlink` or `tedlink-osx` binaries.
 
 ## Installation
 

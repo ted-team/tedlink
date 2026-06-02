@@ -1,7 +1,7 @@
 ---
 name: ted-link
-description: Use TED through the npm-installed tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
-version: 0.1.4
+description: Use TED through the locally bundled tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
+version: 0.1.5
 scope: client
 argument-hint: --prompt "task" [--dir PATH]
 ---
@@ -16,37 +16,86 @@ This `SKILL.md` is version-bound to the TedLink plugin and CLI versions below:
 
 | Component | Version | Binding note |
 | --- | --- | --- |
-| `ted-link` skill (`SKILL.md`) | `0.1.4` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
-| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.4` | Plugin package version that carries this skill. |
-| TedLink CLI (`tedlink --version`) | `0.1.0` | Installed client version this skill workflow is written against. |
+| `ted-link` skill (`SKILL.md`) | `0.1.5` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
+| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.5` | Plugin package version that carries this skill. |
+| TedLink CLI (`tedlink --version`) | `0.1.2` | Bundled client source version this skill workflow is written against. |
 
 Update this table whenever either the skill/plugin version or the TedLink CLI version changes. A mismatch means the instructions in this skill may no longer match the installed client behavior.
 
 Do not split the work into separate start/query commands in the conversation. Do not ask the user to run progress checks. Do not create a supervisor agent. The CLI owns persistence, progress tracking, result file writing, and cleanup. The agent owns only local process supervision: starting the CLI, listening to stdout, and reporting meaningful progress to the user. The agent must keep the foreground conversation active with TedLink progress summaries; do not silently wait for the CLI to finish. Treat CLI recovery files as internal implementation details; do not inspect or describe them unless debugging the CLI itself.
 
-TedLink is not bundled with this skill. Install the CLI from npm before use:
+TedLink CLI source is bundled with this skill at `tedlink-cli/`. If `tedlink` is not already available in `PATH`, install the bundled source globally from the skill directory:
 
 ```bash
-npm install -g tedlink-cli
+npm install -g ./tedlink-cli
 ```
 
-For users in China, use the npmmirror registry:
+When running from a project checkout of this plugin, the equivalent command is:
 
 ```bash
-npm install -g tedlink-cli --registry=https://registry.npmmirror.com
+npm install -g ./skills/ted-link/tedlink-cli
 ```
 
-The npm package installs the `tedlink` executable. Always run `tedlink` from `PATH`; do not look for `skills/ted-link/bin/tedlink`, `skills/ted-link/bin/tedlink-osx`, or any other bundled binary path.
+Only if the bundled source directory is unavailable, install the matching published CLI version:
+
+```bash
+npm install -g tedlink-cli@0.1.2
+```
+
+For users in China, use the npmmirror registry for that fallback:
+
+```bash
+npm install -g tedlink-cli@0.1.2 --registry=https://registry.npmmirror.com
+```
+
+The local or npm package installs the `tedlink` executable. Always run `tedlink` from `PATH`; do not look for `skills/ted-link/bin/tedlink`, `skills/ted-link/bin/tedlink-osx`, or any other binary path.
+
+## Requirement Clarification Before Calling TedLink
+
+For a new TedLink design, simulation, sizing, topology exploration, or report-generation request, clarify the user's requirements before starting the CLI. Do not call `tedlink` until the user has confirmed the concrete task statement.
+
+Choose the clarification questions based on the requested circuit and task. Keep the questions focused on the missing information that materially affects the TedLink run, such as:
+
+- circuit type or topology target, such as OTA, comparator, bandgap, LDO, filter, ADC block, or "choose topology"
+- process, device model, supply voltage, temperature, input common-mode range, output swing, load, and operating corner expectations
+- key performance metrics, such as DC gain, bandwidth/UGB, phase margin, slew rate, noise, offset, CMRR/PSRR, power, area, settling time, linearity, or efficiency
+- required simulations and artifacts, such as schematic/netlist, sizing table, AC/DC/transient/noise/corner/Monte Carlo results, plots, and final report
+- workspace handling, including whether current files should be uploaded with `--upload-workspace`, whether to use a specific `--dir`, and whether the run should be fresh with `--new`
+
+If the user did not provide enough metrics, propose common values and ask the user to confirm or revise them. For example, for a general OTA request with no constraints, propose defaults such as 180 nm CMOS, `VDD=1.8 V`, `temperature=27 C`, `load=1 pF`, `DC gain>=60 dB`, `UGB>=10 MHz`, `phase margin>=60 deg`, `power<=1 mW`, and deliver sizing, netlist, AC/transient simulation results, plots, and a concise report. Adjust defaults to the circuit type and user context instead of forcing OTA-specific values onto unrelated circuits.
+
+After confirmation, combine the confirmed requirements and any agreed default values into one clear prompt for TedLink. For long or structured requirements, write them to a prompt file and use `--prompt-file`.
 
 ## Required Workflow
 
-1. Start the CLI in the background and immediately attach a live stdout listener. Prefer a shell session that remains open so the agent can read stdout as it arrives. Use this pattern:
+1. After the user confirms the concrete requirements, start the CLI in the background and immediately attach a live stdout listener. Prefer a shell session that remains open so the agent can read stdout as it arrives. Use this pattern:
 
 ```bash
 if ! command -v tedlink >/dev/null 2>&1; then
-  echo "Cannot find tedlink. Install it with: npm install -g tedlink-cli" >&2
-  echo "China mirror: npm install -g tedlink-cli --registry=https://registry.npmmirror.com" >&2
-  exit 127
+  skill_cli_dir=""
+  for candidate in \
+    "./tedlink-cli" \
+    "./skills/ted-link/tedlink-cli" \
+    "./.claude/skills/ted-link/tedlink-cli" \
+    "$HOME/.claude/plugins/tedlink/skills/ted-link/tedlink-cli"; do
+    if [ -f "$candidate/package.json" ]; then
+      skill_cli_dir="$candidate"
+      break
+    fi
+  done
+
+  if [ -n "$skill_cli_dir" ]; then
+    npm install -g "$skill_cli_dir"
+  else
+    echo "Cannot find bundled tedlink-cli source. Installing matching version from npm: tedlink-cli@0.1.2" >&2
+    echo "China mirror: npm install -g tedlink-cli@0.1.2 --registry=https://registry.npmmirror.com" >&2
+    npm install -g tedlink-cli@0.1.2
+  fi
+
+  if ! command -v tedlink >/dev/null 2>&1; then
+    echo "Cannot find tedlink after installation." >&2
+    exit 127
+  fi
 fi
 
 run_dir=".tedlink/runs/$(date +%Y%m%d-%H%M%S)-$$"
