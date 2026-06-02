@@ -29,7 +29,7 @@ For users in China, use the npmmirror registry for that fallback:
 npm install -g tedlink-cli@0.1.2 --registry=https://registry.npmmirror.com
 ```
 
-- Environment configured for the TedLink client (`TEDLINK_TOKEN`, `TEDLINK_BASE_URL`)
+- Environment configured for the TedLink client (`TEDLINK_BASE_URL`)
 
 ## Installation
 
