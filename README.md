@@ -29,9 +29,7 @@ For users in China, use the npmmirror registry for that fallback:
 npm install -g tedlink-cli@0.1.2 --registry=https://registry.npmmirror.com
 ```
 
-- Environment configured for the TedLink client (`TEDLINK_TOKEN`)
-
-The local or npm package installs the `tedlink` executable. This plugin does not bundle platform-specific `tedlink` or `tedlink-osx` binaries.
+- Environment configured for the TedLink client (`TEDLINK_TOKEN`, `TEDLINK_BASE_URL`)
 
 ## Installation
 
