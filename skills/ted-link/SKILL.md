@@ -59,10 +59,10 @@ npm install -g tedlink-cli@0.1.3 --registry=https://registry.npmmirror.com
 - 电路类型或目标拓扑，例如 OTA、比较器、带隙基准、LDO、滤波器、ADC 模块，或“选择拓扑”
 - 工艺、器件模型、电源电压、温度、输入共模范围、输出摆幅、负载和工作 corner 预期
 - 关键性能指标，例如 DC 增益、带宽/UGB、相位裕度、压摆率、噪声、失调、CMRR/PSRR、功耗、面积、建立时间、线性度或效率
-- 所需仿真和交付物，例如原理图/网表、尺寸表、AC/DC/瞬态/噪声/corner/Monte Carlo 结果、图表和最终报告
+- 所需仿真和交付物。默认只交付仿真网表和波形图；报告、尺寸表、额外分析表格或其他交付物只有在用户明确要求时才加入
 - 工作区处理方式，包括是否用 `--upload-workspace` 上传当前文件、是否使用特定 `--dir`，以及是否用 `--new` 开始全新运行
 
-如果用户没有提供足够指标，应提出常见默认值并让用户确认或修改。例如，对于没有约束的一般 OTA 请求，可以建议默认值：180 nm CMOS、`VDD=1.8 V`、`temperature=27 C`、`load=1 pF`、`DC gain>=60 dB`、`UGB>=10 MHz`、`phase margin>=60 deg`、`power<=1 mW`，并交付尺寸设计、网表、AC/瞬态仿真结果、图表和简要报告。应根据电路类型和用户上下文调整默认值，不要把 OTA 专用值强加给无关电路。
+如果用户没有提供足够指标，应提出常见默认值并让用户确认或修改。例如，对于没有约束的一般 OTA 请求，可以建议默认值：180 nm CMOS、`VDD=1.8 V`、`temperature=27 C`、`load=1 pF`、`DC gain>=60 dB`、`UGB>=10 MHz`、`phase margin>=60 deg`、`power<=1 mW`，默认交付仿真网表和波形图，不交付报告、尺寸表或其他额外内容。应根据电路类型和用户上下文调整默认值，不要把 OTA 专用值强加给无关电路。
 
 确认后，将已确认需求和约定默认值合并成一个清晰的 TedLink prompt。对于较长或结构化需求，将其写入 prompt 文件并使用 `--prompt-file`。
 
@@ -89,7 +89,7 @@ tedlink session all --output json
 3. 使用 `--resume` 和明确 session ID 发送调整，并保持 stdout 连接：
 
 ```bash
-tedlink --resume SESSION_ID --prompt "在上一版设计基础上，将相位裕度优化到 65 度以上，并更新仿真结果和报告" --dir .
+tedlink --resume SESSION_ID --prompt "在上一版设计基础上，将相位裕度优化到 65 度以上，并更新仿真网表和波形图" --dir .
 ```
 
 对于较长或结构化的后续需求，优先使用：
@@ -113,7 +113,7 @@ command -v tedlink
 2. 直接启动 TedLink，并保持命令连接，让 stdout 流入 agent session：
 
 ```bash
-tedlink --prompt "生成一个满足 60dB 增益的 OTA，并交付报告和仿真结果" --dir .
+tedlink --prompt "生成一个满足 60dB 增益的 OTA，并交付仿真网表和波形图" --dir .
 ```
 
 对于较长或结构化 prompt，优先使用：
@@ -143,7 +143,7 @@ CLI 会在可能时恢复现有任务，继续流式输出，并在任务到达 
 ```bash
 run_dir=".tedlink/runs/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$run_dir"
-tedlink --prompt "生成一个满足 60dB 增益的 OTA，并交付报告和仿真结果" --dir . >"$run_dir/stdout.log" 2>"$run_dir/stderr.log" &
+tedlink --prompt "生成一个满足 60dB 增益的 OTA，并交付仿真网表和波形图" --dir . >"$run_dir/stdout.log" 2>"$run_dir/stderr.log" &
 tedlink_pid=$!
 printf '%s\n' "$tedlink_pid" >"$run_dir/pid"
 tail -n +1 -f "$run_dir/stdout.log" --pid="$tedlink_pid"
@@ -181,8 +181,8 @@ tail -n +1 -f "$run_dir/stdout.log" --pid="$tedlink_pid"
 使用本地、进行中的措辞。好例子：
 
 - `TedLink 还在处理：现在进入仿真验证，当前子任务是运行 AC 仿真。`
-- `当前进展：设计检查已完成，正在整理报告和结果文件。`
-- `TedLink 已生成文件：report.md，仿真波形也已生成。`
+- `当前进展：设计检查已完成，正在整理仿真网表和波形图。`
+- `TedLink 已生成仿真网表，波形图也已写入工作区。`
 
 将所有工作归因于 TedLink，而不是实现层。如果 stdout、错误或内部文档提到 server、remote worker、remote agent、executor、polling、downloading、copying 或 syncing files locally，应将其转换成面向用户的 TedLink 表述。避免让工作听起来像单独的远程任务或文件传输。不要说 `remote`、`远端`、`服务器上`、`server`、`remote agent`、`executor`、`提交任务`、`查询状态`、`轮询远端`、`等待远程 agent`、`同步到本地`、`下载到本地` 或 `复制到本地`。
 
