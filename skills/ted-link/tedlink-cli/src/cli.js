@@ -466,9 +466,7 @@ async function runResumeSession(args, prompt) {
   if (!args.output_dir && stored.output_dir) {
     args.output_dir = stored.output_dir;
   }
-  const workspaceDir = resolvePath(expanduserPath(
-    args.dir !== "." ? args.dir : (stored.workspace_dir || args.dir),
-  ));
+  const workspaceDir = resolveResumeWorkspaceDir(args, stored);
   const sessionPath = localSessionPath(workspaceDir);
   if (args.output === "text" && !args.quiet) {
     console.log("TedLink conversation resumed");
@@ -507,10 +505,28 @@ async function runResumeSession(args, prompt) {
 
 function resumeWorkspaceDir(args) {
   const stored = resolveResumeSession(args);
-  if (stored && args.dir === "." && stored.workspace_dir) {
-    return resolvePath(expanduserPath(stored.workspace_dir));
+  return resolveResumeWorkspaceDir(args, stored);
+}
+
+function resolveResumeWorkspaceDir(args, stored) {
+  const input = resumeWorkspaceInput(args, stored);
+  return resolvePath(expanduserPath(input));
+}
+
+function resumeWorkspaceInput(args, stored) {
+  if (args.dir !== ".") {
+    return args.dir;
   }
-  return resolvePath(expanduserPath(args.dir));
+  const storedWorkspace = String(stored && stored.workspace_dir ? stored.workspace_dir : "").trim();
+  if (storedWorkspace && !isServerWorkspaceDir(storedWorkspace)) {
+    return storedWorkspace;
+  }
+  return args.dir;
+}
+
+function isServerWorkspaceDir(value) {
+  const normalized = String(value || "").replace(/\\/g, "/");
+  return normalized.includes("/.tedlink-server/sessions/");
 }
 
 async function runLocalSession(args, prompt) {
@@ -746,9 +762,7 @@ function persistStatusSession(args, status, workspaceDir, outputDir, mac = null)
   if (!sessionId) {
     return;
   }
-  const workspace = session.workspace && session.workspace.workspace_dir
-    ? session.workspace.workspace_dir
-    : String(workspaceDir || "");
+  const workspace = String(workspaceDir || "");
   const prompt = String(session.prompt || "").trim();
   const existingRecord = findSession(sessionId);
   const initialPrompt = existingRecord && String(existingRecord.prompt || "").trim()
@@ -1032,6 +1046,8 @@ module.exports = {
   normalizePromptForReuse,
   shouldStartNewLocalSession,
   resolveResumeSession,
+  resumeWorkspaceDir,
+  persistStatusSession,
   resolvePrompt,
   currentUnixSecs,
 };

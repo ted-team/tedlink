@@ -12,8 +12,22 @@ const { taskLine } = require("../src/tasks");
 const { buildSubmitPayload, parseSubmitResponse, parseSseEvents, normalizeV3SubmitResponse } = require("../src/api");
 const { authTokenFromEnv } = require("../src/http");
 const { isTerminalSessionState, isPauseSessionState } = require("../src/flow");
-const { createRunRecord, parseArgs, resolveResumeSession, runId } = require("../src/cli");
-const { buildSessionRecord, latestSession, listSessions, promptSummary, upsertSession } = require("../src/session_store");
+const {
+  createRunRecord,
+  parseArgs,
+  persistStatusSession,
+  resolveResumeSession,
+  resumeWorkspaceDir,
+  runId,
+} = require("../src/cli");
+const {
+  buildSessionRecord,
+  findSession,
+  latestSession,
+  listSessions,
+  promptSummary,
+  upsertSession,
+} = require("../src/session_store");
 
 runTest("sanitizes result folder names", () => {
   assert.equal(sanitizeResultFolderComponent("五管OTA设计"), "五管ota设计");
@@ -239,6 +253,57 @@ runTest("resolves latest resume session from TEDLINK_HOME", () => {
     assert.equal(latestSession().session_id, "new");
     assert.equal(resolveResumeSession({ resume_session_id: null }).session_id, "new");
     assert.equal(resolveResumeSession({ resume_session_id: "old" }).session_id, "old");
+  } finally {
+    restoreEnv("TEDLINK_HOME", previousHome);
+  }
+});
+
+runTest("resume ignores stored tedlink-server workspace paths", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-home-"));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-work-"));
+  const previousHome = process.env.TEDLINK_HOME;
+  const previousCwd = process.cwd();
+  process.env.TEDLINK_HOME = root;
+  try {
+    upsertSession(buildSessionRecord({
+      sessionId: "server-path",
+      prompt: "继续优化",
+      decisionUrl: "http://server",
+      workspaceDir: "/home/tedlink/.tedlink-server/sessions/52_54_00_67_1f_d5_user/server-path",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    }));
+    process.chdir(work);
+    assert.equal(resumeWorkspaceDir(parseArgs(["--resume", "server-path"])), fs.realpathSync(work));
+  } finally {
+    process.chdir(previousCwd);
+    restoreEnv("TEDLINK_HOME", previousHome);
+  }
+});
+
+runTest("persists local workspace instead of server status workspace", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-home-"));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-work-"));
+  const output = path.join(work, ".tedlink", "result");
+  const previousHome = process.env.TEDLINK_HOME;
+  process.env.TEDLINK_HOME = root;
+  try {
+    persistStatusSession(
+      { decision_url: "http://server" },
+      {
+        session: {
+          session_id: "s1",
+          state: "completed",
+          prompt: "优化晶体管面积",
+          workspace: {
+            workspace_dir: "/home/tedlink/.tedlink-server/sessions/52_54_00_67_1f_d5_user/s1",
+          },
+        },
+      },
+      work,
+      output,
+      "mac",
+    );
+    assert.equal(findSession("s1").workspace_dir, work);
   } finally {
     restoreEnv("TEDLINK_HOME", previousHome);
   }

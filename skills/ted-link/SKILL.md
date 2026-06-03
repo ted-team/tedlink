@@ -18,7 +18,7 @@ argument-hint: --prompt "task" [--dir PATH]
 | --- | --- | --- |
 | `ted-link` skill (`SKILL.md`) | `0.1.9` | 在本文件 frontmatter 中声明，并与 TedLink 插件发布版本保持一致。 |
 | TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.9` | 携带此技能的插件包版本。 |
-| TedLink CLI (`tedlink --version`) | `0.1.4` | 此技能工作流所针对的捆绑客户端源码版本。 |
+| TedLink CLI (`tedlink --version`) | `0.1.5` | 此技能工作流所针对的捆绑客户端源码版本。 |
 
 当 skill/plugin 版本或 TedLink CLI 版本发生变化时，都要更新此表。版本不匹配意味着本技能中的说明可能不再符合已安装客户端的行为。
 
@@ -39,13 +39,13 @@ npm install -g ./skills/ted-link/tedlink-cli
 只有当捆绑源码目录不可用时，才安装匹配的已发布 CLI 版本：
 
 ```bash
-npm install -g tedlink-cli@0.1.4
+npm install -g tedlink-cli@0.1.5
 ```
 
 中国用户在 fallback 安装时使用 npmmirror registry：
 
 ```bash
-npm install -g tedlink-cli@0.1.4 --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@0.1.5 --registry=https://registry.npmmirror.com
 ```
 
 本地或 npm 包会安装 `tedlink` 可执行文件。始终从 `PATH` 运行 `tedlink`；不要查找 `skills/ted-link/bin/tedlink`、`skills/ted-link/bin/tedlink-osx` 或任何其他二进制路径。

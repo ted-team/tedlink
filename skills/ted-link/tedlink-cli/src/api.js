@@ -53,7 +53,6 @@ function submitRequest(
       .then((streamEvents) => normalizeV3SubmitResponse({
         ...payload,
         session_id: session.session_id,
-        server_workspace_path: session.workspace_path || "",
       }, streamEvents)));
 }
 
@@ -251,8 +250,7 @@ function normalizeV3SubmitResponse(payload, streamEvents) {
       prompt: payload.prompt,
       state: finalStatus ? String(finalStatus.status || "EXECUTING").toLowerCase() : "executing",
       workspace: normalizeWorkspaceInfo({
-        session_dir: payload.server_workspace_path || "",
-        workspace_dir: payload.server_workspace_path || payload.local_workspace_dir || "",
+        workspace_dir: payload.local_workspace_dir || "",
       }),
       metadata: {
         prompt_summary: payload.prompt,
@@ -280,8 +278,8 @@ function normalizeV3SessionStatus(value) {
       prompt,
       state,
       workspace: {
-        session_dir: value.workspace_path || "",
-        workspace_dir: value.workspace_path || "",
+        session_dir: "",
+        workspace_dir: "",
       },
       metadata: {
         prompt_summary: value.prompt_summary || prompt,
