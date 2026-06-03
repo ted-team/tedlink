@@ -8,7 +8,7 @@ argument-hint: --prompt "task" [--dir PATH]
 
 # TedLink
 
-当用户请求电路设计工作，或明确要求 Claude 使用 TED/TedLink 时，使用此技能。客户端会将工作呈现为一个本地长时间运行任务：启动一个 `tedlink` 进程，保持其 stdout 连接，并让进程持续运行直到退出。优先使用直接前台调用。只有在中断或运行时间限制后需要可重新连接的监听器时，才使用后台日志包装方式。
+当用户请求电路设计工作，或明确要求 Claude 使用 TED/TedLink 时，使用此技能。客户端会将工作呈现为一个本地长时间运行任务：启动一个 `tedlink` 进程，保持其 stdout 连接，并让进程持续运行直到退出。始终使用直接前台调用；不要用 shell 脚本、后台进程、日志 tail、pid 文件或其他外部包装实现可重连逻辑。`tedlink` 自身负责创建 `.tedlink/runs/` 运行记录、写入 pid、记录 stdout/stderr 日志、恢复、持久化和结果写入。
 
 ## 版本绑定
 
@@ -18,7 +18,7 @@ argument-hint: --prompt "task" [--dir PATH]
 | --- | --- | --- |
 | `ted-link` skill (`SKILL.md`) | `0.1.9` | 在本文件 frontmatter 中声明，并与 TedLink 插件发布版本保持一致。 |
 | TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.9` | 携带此技能的插件包版本。 |
-| TedLink CLI (`tedlink --version`) | `0.1.3` | 此技能工作流所针对的捆绑客户端源码版本。 |
+| TedLink CLI (`tedlink --version`) | `0.1.4` | 此技能工作流所针对的捆绑客户端源码版本。 |
 
 当 skill/plugin 版本或 TedLink CLI 版本发生变化时，都要更新此表。版本不匹配意味着本技能中的说明可能不再符合已安装客户端的行为。
 
@@ -39,13 +39,13 @@ npm install -g ./skills/ted-link/tedlink-cli
 只有当捆绑源码目录不可用时，才安装匹配的已发布 CLI 版本：
 
 ```bash
-npm install -g tedlink-cli@0.1.3
+npm install -g tedlink-cli@0.1.4
 ```
 
 中国用户在 fallback 安装时使用 npmmirror registry：
 
 ```bash
-npm install -g tedlink-cli@0.1.3 --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@0.1.4 --registry=https://registry.npmmirror.com
 ```
 
 本地或 npm 包会安装 `tedlink` 可执行文件。始终从 `PATH` 运行 `tedlink`；不要查找 `skills/ted-link/bin/tedlink`、`skills/ted-link/bin/tedlink-osx` 或任何其他二进制路径。
@@ -138,18 +138,13 @@ tedlink --dir .
 
 CLI 会在可能时恢复现有任务，继续流式输出，并在任务到达 `completed`、`failed` 或 `cancelled` 时写入最终文件。
 
-8. 如果运行环境要求可重新连接命令，使用最小包装：
+8. 如果运行环境要求可重新连接命令，也不要创建额外 shell wrapper。直接运行 `tedlink`，让 CLI 自己创建 `.tedlink/runs/` 运行记录、写入 pid 和 stdout/stderr 日志，并负责本地恢复和继续监听：
 
 ```bash
-run_dir=".tedlink/runs/$(date +%Y%m%d-%H%M%S)-$$"
-mkdir -p "$run_dir"
-tedlink --prompt "生成一个满足 60dB 增益的 OTA，并交付仿真网表和波形图" --dir . >"$run_dir/stdout.log" 2>"$run_dir/stderr.log" &
-tedlink_pid=$!
-printf '%s\n' "$tedlink_pid" >"$run_dir/pid"
-tail -n +1 -f "$run_dir/stdout.log" --pid="$tedlink_pid"
+tedlink --dir .
 ```
 
-该包装退出后，只有在需要解释非零退出时才读取 `stderr.log`。当直接调用可用时，不要在普通运行中使用该包装。
+如果这是新任务，使用正常的 `--prompt` 或 `--prompt-file` 前台调用；如果是中断后的现有任务，在同一工作区运行 `tedlink --dir .` 继续。不要把 stdout/stderr 重定向到自建日志，也不要通过 `tail` 间接监听；需要运行记录时使用 CLI 自己写入的 `.tedlink/runs/` 内容。
 
 9. CLI 退出后，向用户报告最终状态、非零退出码，以及写入的结果文件。
 

@@ -35,6 +35,8 @@ const {
 } = require("./session_store");
 
 const SESSION_FILE_NAME = ".session";
+const TEDLINK_DIR_NAME = ".tedlink";
+const RUNS_DIR_NAME = "runs";
 const LOCAL_POLL_INTERVAL_MS = 5000;
 let currentStreamSection = "";
 
@@ -90,17 +92,20 @@ async function runCli(argv) {
   }
   const prompt = await resolvePrompt(args);
   if (args.resume) {
-    return runResumeSession(args, prompt);
+    const workspaceDir = resumeWorkspaceDir(args);
+    return withRunRecord(args, workspaceDir, "resume", prompt, () => runResumeSession(args, prompt));
   }
   if (prompt !== null) {
     if (args.submit_only) {
-      return runSubmitOnly(args, prompt);
+      const workspaceDir = resolvePath(expanduserPath(args.dir));
+      return withRunRecord(args, workspaceDir, "submit-only", prompt, () => runSubmitOnly(args, prompt));
     }
-    return runLocalSession(args, prompt);
+    const workspaceDir = resolvePath(expanduserPath(args.dir));
+    return withRunRecord(args, workspaceDir, "local", prompt, () => runLocalSession(args, prompt));
   }
   const workspaceDir = resolvePath(expanduserPath(args.dir));
   if (fs.existsSync(localSessionPath(workspaceDir))) {
-    return runLocalSession(args, null);
+    return withRunRecord(args, workspaceDir, "recover", null, () => runLocalSession(args, null));
   }
   throw new Error("missing prompt and no recoverable TedLink task in this directory");
 }
@@ -500,6 +505,14 @@ async function runResumeSession(args, prompt) {
   return pollLocalSession(args, localSession, workspaceDir, sessionPath, Date.now());
 }
 
+function resumeWorkspaceDir(args) {
+  const stored = resolveResumeSession(args);
+  if (stored && args.dir === "." && stored.workspace_dir) {
+    return resolvePath(expanduserPath(stored.workspace_dir));
+  }
+  return resolvePath(expanduserPath(args.dir));
+}
+
 async function runLocalSession(args, prompt) {
   const submittedAt = Date.now();
   const workspaceDir = resolvePath(expanduserPath(args.dir));
@@ -872,6 +885,87 @@ function localSessionPath(workspaceDir) {
   return path.join(workspaceDir, SESSION_FILE_NAME);
 }
 
+async function withRunRecord(args, workspaceDir, mode, prompt, fn) {
+  const runRecord = createRunRecord(args, workspaceDir, mode, prompt);
+  const restoreLogging = installRunLogTee(runRecord);
+  try {
+    return await fn();
+  } finally {
+    await restoreLogging();
+  }
+}
+
+function createRunRecord(args, workspaceDir, mode, prompt) {
+  const startedAt = new Date();
+  const runDir = path.join(workspaceDir, TEDLINK_DIR_NAME, RUNS_DIR_NAME, runId(startedAt, process.pid));
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, "pid"), `${process.pid}\n`);
+  fs.writeFileSync(path.join(runDir, "meta.json"), JSON.stringify({
+    pid: process.pid,
+    mode,
+    started_at: startedAt.toISOString(),
+    workspace_dir: String(workspaceDir),
+    output: args.output,
+    quiet: Boolean(args.quiet),
+    prompt_summary: prompt ? String(prompt).trim().slice(0, 160) : "",
+  }, null, 2));
+  return {
+    runDir,
+    stdoutPath: path.join(runDir, "stdout.log"),
+    stderrPath: path.join(runDir, "stderr.log"),
+  };
+}
+
+function installRunLogTee(runRecord) {
+  const stdoutStream = fs.createWriteStream(runRecord.stdoutPath, { flags: "a" });
+  const stderrStream = fs.createWriteStream(runRecord.stderrPath, { flags: "a" });
+  const originalStdoutWrite = process.stdout.write;
+  const originalStderrWrite = process.stderr.write;
+
+  process.stdout.write = function writeStdout(chunk, encoding, callback) {
+    stdoutStream.write(chunk, encoding);
+    return originalStdoutWrite.call(process.stdout, chunk, encoding, callback);
+  };
+  process.stderr.write = function writeStderr(chunk, encoding, callback) {
+    stderrStream.write(chunk, encoding);
+    return originalStderrWrite.call(process.stderr, chunk, encoding, callback);
+  };
+
+  return () => {
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+    return Promise.all([
+      closeWriteStream(stdoutStream),
+      closeWriteStream(stderrStream),
+    ]);
+  };
+}
+
+function closeWriteStream(stream) {
+  return new Promise((resolve, reject) => {
+    stream.once("error", reject);
+    stream.end(resolve);
+  });
+}
+
+function runId(date, pid) {
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+    "-",
+    padDatePart(date.getHours()),
+    padDatePart(date.getMinutes()),
+    padDatePart(date.getSeconds()),
+    "-",
+    pid,
+  ].join("");
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, "0");
+}
+
 async function readLocalSession(filePath) {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -933,6 +1027,8 @@ module.exports = {
   effectiveDeliverResultFiles,
   effectiveUploadWorkspace,
   localSessionPath,
+  createRunRecord,
+  runId,
   normalizePromptForReuse,
   shouldStartNewLocalSession,
   resolveResumeSession,

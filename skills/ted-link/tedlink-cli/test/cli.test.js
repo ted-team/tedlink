@@ -12,7 +12,7 @@ const { taskLine } = require("../src/tasks");
 const { buildSubmitPayload, parseSubmitResponse, parseSseEvents, normalizeV3SubmitResponse } = require("../src/api");
 const { authTokenFromEnv } = require("../src/http");
 const { isTerminalSessionState, isPauseSessionState } = require("../src/flow");
-const { parseArgs, resolveResumeSession } = require("../src/cli");
+const { createRunRecord, parseArgs, resolveResumeSession, runId } = require("../src/cli");
 const { buildSessionRecord, latestSession, listSessions, promptSummary, upsertSession } = require("../src/session_store");
 
 runTest("sanitizes result folder names", () => {
@@ -242,6 +242,23 @@ runTest("resolves latest resume session from TEDLINK_HOME", () => {
   } finally {
     restoreEnv("TEDLINK_HOME", previousHome);
   }
+});
+
+runTest("creates local run records with pid and metadata", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-run-"));
+  const record = createRunRecord({ output: "text", quiet: false }, root, "local", "生成 OTA");
+  assert.match(record.runDir, /\.tedlink[/\\]runs[/\\]\d{8}-\d{6}-\d+$/);
+  assert.equal(fs.readFileSync(path.join(record.runDir, "pid"), "utf8"), `${process.pid}\n`);
+  const metadata = JSON.parse(fs.readFileSync(path.join(record.runDir, "meta.json"), "utf8"));
+  assert.equal(metadata.pid, process.pid);
+  assert.equal(metadata.mode, "local");
+  assert.equal(metadata.workspace_dir, root);
+  assert.equal(metadata.prompt_summary, "生成 OTA");
+});
+
+runTest("formats run ids like shell date pid wrappers", () => {
+  const id = runId(new Date(2026, 0, 2, 3, 4, 5), 123);
+  assert.equal(id, "20260102-030405-123");
 });
 
 runTest("completed with warnings is terminal", () => {
