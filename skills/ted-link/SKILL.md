@@ -1,7 +1,7 @@
 ---
 name: ted-link
 description: Use TED through the locally bundled tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
-version: 0.1.6
+version: 0.1.7
 scope: client
 argument-hint: --prompt "task" [--dir PATH]
 ---
@@ -16,8 +16,8 @@ This `SKILL.md` is version-bound to the TedLink plugin and CLI versions below:
 
 | Component | Version | Binding note |
 | --- | --- | --- |
-| `ted-link` skill (`SKILL.md`) | `0.1.6` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
-| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.6` | Plugin package version that carries this skill. |
+| `ted-link` skill (`SKILL.md`) | `0.1.7` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
+| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.7` | Plugin package version that carries this skill. |
 | TedLink CLI (`tedlink --version`) | `0.1.2` | Bundled client source version this skill workflow is written against. |
 
 Update this table whenever either the skill/plugin version or the TedLink CLI version changes. A mismatch means the instructions in this skill may no longer match the installed client behavior.
@@ -66,6 +66,35 @@ If the user did not provide enough metrics, propose common values and ask the us
 
 After confirmation, combine the confirmed requirements and any agreed default values into one clear prompt for TedLink. For long or structured requirements, write them to a prompt file and use `--prompt-file`.
 
+## Follow-Up Adjustments After a Design Task
+
+If TedLink has completed a design task and the user asks for an adjustment, optimization, revision, or additional deliverable for that same design, treat it as a follow-up to the existing TedLink session, not as a new task. Examples include changing specs, improving performance, regenerating plots, adding corners, revising the report, or asking TedLink to fix issues in the delivered files.
+
+For follow-up adjustments:
+
+1. Identify the session ID from the prior TedLink stdout/final summary. If it is not visible in the current conversation, run:
+
+```bash
+tedlink session list --output json
+```
+
+Use the matching session for the current workspace or the latest relevant session. If more than one plausible session exists and the correct one cannot be inferred, ask the user which design/session to adjust.
+
+2. Clarify only the missing adjustment details. Do not repeat the full new-task requirement workflow when the user's requested change is already concrete.
+3. Send the adjustment with `--resume` and the explicit session ID, keeping stdout attached:
+
+```bash
+tedlink --resume SESSION_ID --prompt "在上一版设计基础上，将相位裕度优化到 65 度以上，并更新仿真结果和报告" --dir .
+```
+
+For long or structured follow-up requirements, prefer:
+
+```bash
+tedlink --resume SESSION_ID --prompt-file adjustment.md --dir .
+```
+
+4. Keep listening and reporting progress exactly like a normal TedLink run. Do not use `--new` for follow-up adjustments unless the user explicitly asks to start over.
+
 ## Required Workflow
 
 1. After the user confirms the concrete requirements, check whether `tedlink` is already available:
@@ -92,7 +121,7 @@ tedlink --prompt-file request.md --dir .
 4. Read stdout as it streams and report meaningful progress to the user. The CLI still manages persistence, progress tracking, result file writing, and cleanup internally. Do not rely on raw tool output being visible to the user; convert important stdout changes into assistant messages in the foreground conversation.
 5. While TedLink is running, send a foreground progress message whenever the phase, active todo/subtask, useful activity line, generated file list, or terminal state changes. Also send a brief progress message at least every 60 seconds during long quiet periods, using the most recent stdout state. If nothing has changed, say that TedLink is still working and name the last known phase or active item.
 6. Do not run foreground polling probes such as `sleep 30 && tedlink --status ...`, repeated one-shot status commands, or repeated log reads. Keep one command attached to the TedLink stdout listener, and use assistant messages only to summarize TedLink progress.
-7. If the stdout listener is interrupted and no running shell session can be resumed, continue the existing task from the current workspace:
+7. If the stdout listener is interrupted and no running shell session can be resumed, continue the still-running existing task from the current workspace:
 
 ```bash
 tedlink --dir .
@@ -115,7 +144,7 @@ After this wrapper exits, read `stderr.log` only if needed to explain a nonzero 
 
 9. After the CLI exits, report the final state, exit code if nonzero, and any written result files to the user.
 
-Local session recovery rule: the CLI keeps a local recovery marker for the current directory. Running `tedlink --dir .` without a prompt resumes the existing task. Running `tedlink --prompt ... --dir .` resumes only when the supplied prompt matches the stored task prompt after whitespace normalization; a different prompt starts a new task and replaces the local recovery marker. If the user wants to rerun the same prompt as a fresh task, pass `--new` together with the prompt. Do not delete or edit the recovery marker unless debugging TedLink itself.
+Local session recovery rule: the CLI keeps a local recovery marker for the current directory. Running `tedlink --dir .` without a prompt resumes the existing in-progress task after an interruption. Running `tedlink --prompt ... --dir .` resumes only when the supplied prompt matches the stored task prompt after whitespace normalization; a different prompt starts a new task and replaces the local recovery marker. For user-requested adjustments after a completed design task, do not rely on prompt matching or the local marker; use `tedlink --resume SESSION_ID --prompt ... --dir .` with the relevant session ID so the adjustment continues the prior TedLink session. If the user wants to rerun the same prompt as a fresh task, pass `--new` together with the prompt. Do not delete or edit the recovery marker unless debugging TedLink itself.
 
 For long prompts, use `--prompt-file request.md` instead of `--prompt`.
 
@@ -170,6 +199,7 @@ TED tasks may exceed 15 minutes. Do not treat a long-running non-terminal task a
 - `--shared-dir PATH`: additional files to send as shared input when starting the task.
 - `--output-dir PATH`: where returned result files should be written.
 - `--session-id ID`: reuse or name a task session when starting.
+- `--resume [SESSION_ID]`: continue an existing TedLink session for follow-up adjustments. Use an explicit session ID when the user asks to adjust a completed design.
 - `--new`: force a fresh task for the supplied prompt even if the current directory has a matching recoverable task.
 - `--prompt-file PATH`: read the task prompt from a file.
 - `--prompt-stdin`: read the task prompt from stdin.
