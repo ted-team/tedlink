@@ -19,9 +19,21 @@ export ANTHROPIC_MODEL=claude-sonnet-4-6
 ./src/main.js --prompt "run simulation" --dir .
 ```
 
+List locally recorded sessions:
+
+```bash
+./src/main.js session list --output json
+```
+
+Equivalent explicit local all-sessions command:
+
+```bash
+./src/main.js session all --output json
+```
+
 The client uses:
 
 - `POST /api/v3/session/create`
-- `POST /api/v3/orchestrate/chat`
+- `POST /api/v3/execute/chat`
 - `POST /api/v3/session/recover`
 - `GET /api/v3/sync/download`

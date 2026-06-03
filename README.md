@@ -20,13 +20,13 @@ npm install -g ./skills/ted-link/tedlink-cli
 If the bundled source directory is unavailable, install the matching published CLI version:
 
 ```bash
-npm install -g tedlink-cli@0.1.2
+npm install -g tedlink-cli@0.1.3
 ```
 
 For users in China, use the npmmirror registry for that fallback:
 
 ```bash
-npm install -g tedlink-cli@0.1.2 --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@0.1.3 --registry=https://registry.npmmirror.com
 ```
 
 - Environment configured for the TedLink client (`TEDLINK_BASE_URL`)
@@ -124,10 +124,10 @@ When the user asks for adjustments after a TedLink design is complete in the cur
 tedlink --resume SESSION_ID --prompt "继续优化上一版 OTA，将相位裕度提升到 65 度以上，并更新报告和仿真结果" --dir .
 ```
 
-Do not resume the latest stored session automatically in a new Claude conversation. If the user explicitly asks to continue a historical TedLink task but does not provide the session ID, list recorded sessions and let the user choose:
+Do not resume the latest stored session automatically in a new Claude conversation. If the user explicitly asks to continue a historical TedLink task but does not provide the session ID, list locally recorded TedLink sessions and let the user choose:
 
 ```bash
-tedlink session list --output json
+tedlink session all --output json
 ```
 
 ## Plugin Manifest

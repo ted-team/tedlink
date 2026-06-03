@@ -1,7 +1,7 @@
 ---
 name: ted-link
 description: Use TED through the locally bundled tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
-version: 0.1.8
+version: 0.1.9
 scope: client
 argument-hint: --prompt "task" [--dir PATH]
 ---
@@ -16,9 +16,9 @@ This `SKILL.md` is version-bound to the TedLink plugin and CLI versions below:
 
 | Component | Version | Binding note |
 | --- | --- | --- |
-| `ted-link` skill (`SKILL.md`) | `0.1.8` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
-| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.8` | Plugin package version that carries this skill. |
-| TedLink CLI (`tedlink --version`) | `0.1.2` | Bundled client source version this skill workflow is written against. |
+| `ted-link` skill (`SKILL.md`) | `0.1.9` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
+| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.9` | Plugin package version that carries this skill. |
+| TedLink CLI (`tedlink --version`) | `0.1.3` | Bundled client source version this skill workflow is written against. |
 
 Update this table whenever either the skill/plugin version or the TedLink CLI version changes. A mismatch means the instructions in this skill may no longer match the installed client behavior.
 
@@ -39,13 +39,13 @@ npm install -g ./skills/ted-link/tedlink-cli
 Only if the bundled source directory is unavailable, install the matching published CLI version:
 
 ```bash
-npm install -g tedlink-cli@0.1.2
+npm install -g tedlink-cli@0.1.3
 ```
 
 For users in China, use the npmmirror registry for that fallback:
 
 ```bash
-npm install -g tedlink-cli@0.1.2 --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@0.1.3 --registry=https://registry.npmmirror.com
 ```
 
 The local or npm package installs the `tedlink` executable. Always run `tedlink` from `PATH`; do not look for `skills/ted-link/bin/tedlink`, `skills/ted-link/bin/tedlink-osx`, or any other binary path.
@@ -76,10 +76,10 @@ For follow-up adjustments:
 
 1. Identify the session ID from the prior TedLink stdout/final summary in the current Claude conversation. If the user explicitly provided a session ID, use that ID.
 
-If the user explicitly asks to continue a historical TedLink task but does not provide the session ID, you may list recorded sessions to help them choose:
+If the user explicitly asks to continue a historical TedLink task but does not provide the session ID, you may list locally recorded TedLink sessions to help them choose:
 
 ```bash
-tedlink session list --output json
+tedlink session all --output json
 ```
 
 Do not choose the latest session automatically. Use only the user-selected session. If the current conversation does not contain a TedLink session and the user has not explicitly requested a historical session, treat the request as a new task and follow the new-task clarification workflow.
@@ -204,6 +204,8 @@ TED tasks may exceed 15 minutes. Do not treat a long-running non-terminal task a
 - `--output-dir PATH`: where returned result files should be written.
 - `--session-id ID`: reuse or name a task session when starting.
 - `--resume [SESSION_ID]`: continue an existing TedLink session for follow-up adjustments. Use an explicit session ID from the current Claude conversation, or a historical session explicitly selected by the user.
+- `session all --output json`: list all locally recorded TedLink sessions from this machine so the user can choose a historical session explicitly. Do not auto-select the latest session.
+- `session list --output json`: alias for listing locally recorded sessions from this machine.
 - `--new`: force a fresh task for the supplied prompt even if the current directory has a matching recoverable task.
 - `--prompt-file PATH`: read the task prompt from a file.
 - `--prompt-stdin`: read the task prompt from stdin.

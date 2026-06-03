@@ -44,6 +44,7 @@ function printHelp() {
 Usage:
   tedlink [options]
   tedlink session list [--output text|json]
+  tedlink session all [--output text|json]
 
 Options:
   --prompt <TEXT>
@@ -139,7 +140,7 @@ function parseArgs(argv) {
     _positionals: [],
   };
 
-  if (argv.length >= 2 && argv[0] === "session" && argv[1] === "list") {
+  if (argv.length >= 2 && argv[0] === "session" && ["list", "all"].includes(argv[1])) {
     args.command = "session-list";
     argv = argv.slice(2);
   }
@@ -698,7 +699,7 @@ async function finishLocalSession(args, finalStatus, workspaceDir, sessionPath) 
   }
 }
 
-function runSessionList(args) {
+async function runSessionList(args) {
   const sessions = listSessions();
   if (args.output === "json") {
     console.log(JSON.stringify({

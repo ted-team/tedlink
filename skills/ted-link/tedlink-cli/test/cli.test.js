@@ -182,6 +182,12 @@ runTest("parses session list command", () => {
   assert.equal(args.output, "json");
 });
 
+runTest("parses session all command", () => {
+  const args = parseArgs(["session", "all", "--output", "json"]);
+  assert.equal(args.command, "session-list");
+  assert.equal(args.output, "json");
+});
+
 runTest("parses resume flag with optional session id", () => {
   let args = parseArgs(["--resume", "--prompt", "继续优化"]);
   assert.equal(args.resume, true);
