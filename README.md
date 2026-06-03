@@ -118,13 +118,13 @@ Examples:
 Use the ted-link skill to design a 60dB gain OTA and deliver netlist, simulation waveforms, and a report.
 ```
 
-When the user asks for adjustments after a TedLink design is complete, the skill resumes the prior TedLink session instead of starting over. The follow-up command should include the previous session ID and the new requirement:
+When the user asks for adjustments after a TedLink design is complete in the current Claude conversation, the skill resumes that conversation's TedLink session instead of starting over. The follow-up command should include the visible session ID and the new requirement:
 
 ```bash
 tedlink --resume SESSION_ID --prompt "继续优化上一版 OTA，将相位裕度提升到 65 度以上，并更新报告和仿真结果" --dir .
 ```
 
-If the previous session ID is not visible in the conversation, list recorded sessions first:
+Do not resume the latest stored session automatically in a new Claude conversation. If the user explicitly asks to continue a historical TedLink task but does not provide the session ID, list recorded sessions and let the user choose:
 
 ```bash
 tedlink session list --output json

@@ -1,7 +1,7 @@
 ---
 name: ted-link
 description: Use TED through the locally bundled tedlink client for long-running local-feeling circuit design tasks. Trigger for analog/mixed-signal circuit design, schematic/netlist/simulation/report generation, device sizing, topology exploration, or whenever the user explicitly asks to use TED, TedLink, or tedlink.
-version: 0.1.7
+version: 0.1.8
 scope: client
 argument-hint: --prompt "task" [--dir PATH]
 ---
@@ -16,8 +16,8 @@ This `SKILL.md` is version-bound to the TedLink plugin and CLI versions below:
 
 | Component | Version | Binding note |
 | --- | --- | --- |
-| `ted-link` skill (`SKILL.md`) | `0.1.7` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
-| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.7` | Plugin package version that carries this skill. |
+| `ted-link` skill (`SKILL.md`) | `0.1.8` | Declared in this file's frontmatter and aligned with the TedLink plugin release. |
+| TedLink plugin (`.claude-plugin/plugin.json`) | `0.1.8` | Plugin package version that carries this skill. |
 | TedLink CLI (`tedlink --version`) | `0.1.2` | Bundled client source version this skill workflow is written against. |
 
 Update this table whenever either the skill/plugin version or the TedLink CLI version changes. A mismatch means the instructions in this skill may no longer match the installed client behavior.
@@ -68,17 +68,21 @@ After confirmation, combine the confirmed requirements and any agreed default va
 
 ## Follow-Up Adjustments After a Design Task
 
-If TedLink has completed a design task and the user asks for an adjustment, optimization, revision, or additional deliverable for that same design, treat it as a follow-up to the existing TedLink session, not as a new task. Examples include changing specs, improving performance, regenerating plots, adding corners, revising the report, or asking TedLink to fix issues in the delivered files.
+If TedLink has completed a design task in the current Claude conversation and the user asks for an adjustment, optimization, revision, or additional deliverable for that same design, treat it as a follow-up to the existing TedLink session, not as a new task. Examples include changing specs, improving performance, regenerating plots, adding corners, revising the report, or asking TedLink to fix issues in the delivered files.
+
+The follow-up must be tied to this Claude conversation's current context. Do not resume a session from a previous or separate Claude conversation just because it is the latest stored TedLink session. Only use `--resume` when the session ID is visible from this conversation's TedLink run, or when the user explicitly names the session ID or explicitly identifies the historical TedLink task to continue. If the user asks to adjust "the previous design" in a new conversation without an explicit session, ask for the session ID or the original design context instead of auto-resuming.
 
 For follow-up adjustments:
 
-1. Identify the session ID from the prior TedLink stdout/final summary. If it is not visible in the current conversation, run:
+1. Identify the session ID from the prior TedLink stdout/final summary in the current Claude conversation. If the user explicitly provided a session ID, use that ID.
+
+If the user explicitly asks to continue a historical TedLink task but does not provide the session ID, you may list recorded sessions to help them choose:
 
 ```bash
 tedlink session list --output json
 ```
 
-Use the matching session for the current workspace or the latest relevant session. If more than one plausible session exists and the correct one cannot be inferred, ask the user which design/session to adjust.
+Do not choose the latest session automatically. Use only the user-selected session. If the current conversation does not contain a TedLink session and the user has not explicitly requested a historical session, treat the request as a new task and follow the new-task clarification workflow.
 
 2. Clarify only the missing adjustment details. Do not repeat the full new-task requirement workflow when the user's requested change is already concrete.
 3. Send the adjustment with `--resume` and the explicit session ID, keeping stdout attached:
@@ -144,7 +148,7 @@ After this wrapper exits, read `stderr.log` only if needed to explain a nonzero 
 
 9. After the CLI exits, report the final state, exit code if nonzero, and any written result files to the user.
 
-Local session recovery rule: the CLI keeps a local recovery marker for the current directory. Running `tedlink --dir .` without a prompt resumes the existing in-progress task after an interruption. Running `tedlink --prompt ... --dir .` resumes only when the supplied prompt matches the stored task prompt after whitespace normalization; a different prompt starts a new task and replaces the local recovery marker. For user-requested adjustments after a completed design task, do not rely on prompt matching or the local marker; use `tedlink --resume SESSION_ID --prompt ... --dir .` with the relevant session ID so the adjustment continues the prior TedLink session. If the user wants to rerun the same prompt as a fresh task, pass `--new` together with the prompt. Do not delete or edit the recovery marker unless debugging TedLink itself.
+Local session recovery rule: the CLI keeps a local recovery marker for the current directory. Running `tedlink --dir .` without a prompt resumes the existing in-progress task after an interruption. Running `tedlink --prompt ... --dir .` resumes only when the supplied prompt matches the stored task prompt after whitespace normalization; a different prompt starts a new task and replaces the local recovery marker. For user-requested adjustments after a completed design task in the current Claude conversation, do not rely on prompt matching or the local marker; use `tedlink --resume SESSION_ID --prompt ... --dir .` with the current conversation's relevant session ID so the adjustment continues that TedLink session. Do not use the latest stored session from a previous Claude conversation unless the user explicitly selected it. If the user wants to rerun the same prompt as a fresh task, pass `--new` together with the prompt. Do not delete or edit the recovery marker unless debugging TedLink itself.
 
 For long prompts, use `--prompt-file request.md` instead of `--prompt`.
 
@@ -199,7 +203,7 @@ TED tasks may exceed 15 minutes. Do not treat a long-running non-terminal task a
 - `--shared-dir PATH`: additional files to send as shared input when starting the task.
 - `--output-dir PATH`: where returned result files should be written.
 - `--session-id ID`: reuse or name a task session when starting.
-- `--resume [SESSION_ID]`: continue an existing TedLink session for follow-up adjustments. Use an explicit session ID when the user asks to adjust a completed design.
+- `--resume [SESSION_ID]`: continue an existing TedLink session for follow-up adjustments. Use an explicit session ID from the current Claude conversation, or a historical session explicitly selected by the user.
 - `--new`: force a fresh task for the supplied prompt even if the current directory has a matching recoverable task.
 - `--prompt-file PATH`: read the task prompt from a file.
 - `--prompt-stdin`: read the task prompt from stdin.
