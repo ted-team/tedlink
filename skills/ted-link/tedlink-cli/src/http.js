@@ -174,6 +174,11 @@ function authTokenFromEnv() {
   if (legacyToken) {
     return { name: "TEDLINK_TOKEN", value: legacyToken };
   }
+  const { authStorePath, loadAuthStore } = require("./auth");
+  const store = loadAuthStore();
+  if (store.token) {
+    return { name: authStorePath(), value: store.token };
+  }
   return { name: "", value: null };
 }
 

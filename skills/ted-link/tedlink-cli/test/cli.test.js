@@ -18,6 +18,7 @@ const {
   persistStatusSession,
   resolveResumeSession,
   resumeWorkspaceDir,
+  runAuthCommand,
   runId,
 } = require("../src/cli");
 const {
@@ -28,6 +29,8 @@ const {
   promptSummary,
   upsertSession,
 } = require("../src/session_store");
+
+const pendingTests = [];
 
 runTest("sanitizes result folder names", () => {
   assert.equal(sanitizeResultFolderComponent("五管OTA设计"), "五管ota设计");
@@ -202,6 +205,25 @@ runTest("parses session all command", () => {
   assert.equal(args.output, "json");
 });
 
+runTest("parses auth status command", () => {
+  const args = parseArgs(["auth", "status", "--output", "json"]);
+  assert.equal(args.command, "auth-status");
+  assert.equal(args.output, "json");
+});
+
+runTest("parses auth token command", () => {
+  const args = parseArgs(["auth", "token", "--token", "secret"]);
+  assert.equal(args.command, "auth-token");
+  assert.equal(args.token, "secret");
+});
+
+runTest("parses auth login command", () => {
+  const args = parseArgs(["auth", "login", "--email", "user@example.com", "--password", "secret"]);
+  assert.equal(args.command, "auth-login");
+  assert.equal(args.email, "user@example.com");
+  assert.equal(args.password, "secret");
+});
+
 runTest("parses resume flag with optional session id", () => {
   let args = parseArgs(["--resume", "--prompt", "继续优化"]);
   assert.equal(args.resume, true);
@@ -349,9 +371,84 @@ runTest("uses TEDLINK_AUTH_TOKEN for HTTP auth", () => {
   }
 });
 
+runTest("uses TEDLINK_TOKEN when TEDLINK_AUTH_TOKEN is unset", () => {
+  const previousAuth = process.env.TEDLINK_AUTH_TOKEN;
+  const previousLegacy = process.env.TEDLINK_TOKEN;
+  delete process.env.TEDLINK_AUTH_TOKEN;
+  process.env.TEDLINK_TOKEN = "legacy-token";
+  try {
+    assert.deepEqual(authTokenFromEnv(), { name: "TEDLINK_TOKEN", value: "legacy-token" });
+  } finally {
+    restoreEnv("TEDLINK_AUTH_TOKEN", previousAuth);
+    restoreEnv("TEDLINK_TOKEN", previousLegacy);
+  }
+});
+
+runTest("auth status reports TEDLINK_TOKEN without exposing token", () => {
+  const previousAuth = process.env.TEDLINK_AUTH_TOKEN;
+  const previousLegacy = process.env.TEDLINK_TOKEN;
+  const originalLog = console.log;
+  const lines = [];
+  delete process.env.TEDLINK_AUTH_TOKEN;
+  process.env.TEDLINK_TOKEN = "legacy-secret";
+  console.log = (line) => lines.push(String(line));
+  try {
+    runAuthCommand({ command: "auth-status", output: "json", auth_base_url: "http://127.0.0.1:9543" });
+    const status = JSON.parse(lines.join("\n"));
+    assert.equal(status.token_configured, true);
+    assert.equal(status.token_source, "TEDLINK_TOKEN");
+    assert.deepEqual(status.token_sources_priority, ["TEDLINK_AUTH_TOKEN", "TEDLINK_TOKEN", "auth_store"]);
+    assert.equal(lines.join("\n").includes("legacy-secret"), false);
+  } finally {
+    console.log = originalLog;
+    restoreEnv("TEDLINK_AUTH_TOKEN", previousAuth);
+    restoreEnv("TEDLINK_TOKEN", previousLegacy);
+  }
+});
+
+runTest("auth token stores token and HTTP auth reads auth store", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-auth-home-"));
+  const previousHome = process.env.TEDLINK_HOME;
+  const previousAuth = process.env.TEDLINK_AUTH_TOKEN;
+  const previousLegacy = process.env.TEDLINK_TOKEN;
+  const originalLog = console.log;
+  const lines = [];
+  process.env.TEDLINK_HOME = root;
+  delete process.env.TEDLINK_AUTH_TOKEN;
+  delete process.env.TEDLINK_TOKEN;
+  console.log = (line) => lines.push(String(line));
+  try {
+    runAuthCommand({ command: "auth-token", output: "json", token: "stored-secret" });
+    assert.equal(lines.join("\n").includes("stored-secret"), false);
+    const source = authTokenFromEnv();
+    assert.equal(source.value, "stored-secret");
+    assert.match(source.name, /auth\.json$/);
+    lines.length = 0;
+    runAuthCommand({ command: "auth-status", output: "json", auth_base_url: "http://127.0.0.1:9543" });
+    const status = JSON.parse(lines.join("\n"));
+    assert.equal(status.token_configured, true);
+    assert.match(status.token_source, /auth\.json$/);
+  } finally {
+    console.log = originalLog;
+    restoreEnv("TEDLINK_HOME", previousHome);
+    restoreEnv("TEDLINK_AUTH_TOKEN", previousAuth);
+    restoreEnv("TEDLINK_TOKEN", previousLegacy);
+  }
+});
+
 function runTest(name, fn) {
   try {
-    fn();
+    const result = fn();
+    if (result && typeof result.then === "function") {
+      pendingTests.push(result
+        .then(() => console.log(`ok - ${name}`))
+        .catch((err) => {
+          console.error(`not ok - ${name}`);
+          console.error(err && err.stack ? err.stack : String(err));
+          process.exitCode = 1;
+        }));
+      return;
+    }
     console.log(`ok - ${name}`);
   } catch (err) {
     console.error(`not ok - ${name}`);
@@ -359,6 +456,10 @@ function runTest(name, fn) {
     process.exitCode = 1;
   }
 }
+
+process.once("beforeExit", async () => {
+  await Promise.all(pendingTests);
+});
 
 function restoreEnv(name, value) {
   if (value === undefined) {

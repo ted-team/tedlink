@@ -19,11 +19,40 @@ export ANTHROPIC_MODEL=claude-sonnet-4-6
 ./src/main.js --prompt "run simulation" --dir .
 ```
 
+When TedLink is used through the skill, Claude must tell the user that `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` are sent to the TedLink server, and task execution consumes the user's token through those environment variables. The CLI itself does not prompt for `[y/N]` confirmation.
+
 List locally recorded sessions:
 
 ```bash
 ./src/main.js session list --output json
 ```
+
+Check TedLink service authentication without printing token values:
+
+```bash
+./src/main.js auth status --output json
+```
+
+Store an existing TedLink service token:
+
+```bash
+./src/main.js auth token --token <TOKEN>
+```
+
+Log in or start registration:
+
+```bash
+./src/main.js auth login --email <EMAIL>
+./src/main.js auth register --email <EMAIL>
+```
+
+Clear the stored token:
+
+```bash
+./src/main.js auth logout
+```
+
+Environment token priority is `TEDLINK_AUTH_TOKEN > TEDLINK_TOKEN`.
 
 Equivalent explicit local all-sessions command:
 

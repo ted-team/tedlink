@@ -4,6 +4,17 @@ const fs = require("fs");
 const path = require("path");
 const { submitRequest, sessionStatus, downloadResultArchive } = require("./api");
 const {
+  authBaseUrl,
+  authStorePath,
+  clearAuthStore,
+  currentTokenSource,
+  loadAuthStore,
+  loginAndCreateToken,
+  missingTokenMessage,
+  saveExistingToken,
+  sendEmailVerification,
+} = require("./auth");
+const {
   defaultMac,
   defaultUser,
   normalizeMacIdentity,
@@ -47,6 +58,11 @@ Usage:
   tedlink [options]
   tedlink session list [--output text|json]
   tedlink session all [--output text|json]
+  tedlink auth status [--output text|json]
+  tedlink auth token --token <TOKEN>
+  tedlink auth login --email <EMAIL>
+  tedlink auth register --email <EMAIL>
+  tedlink auth logout
 
 Options:
   --prompt <TEXT>
@@ -76,11 +92,19 @@ Options:
   --heartbeat-sec <SECONDS>
   --output <text|json>
   --quiet
+
+Auth options:
+  --email <EMAIL>
+  --password <PASSWORD>
+  --token <TOKEN>
 `);
 }
 
 async function runCli(argv) {
   const args = parseArgs(argv);
+  if (args.command && args.command.startsWith("auth-")) {
+    return runAuthCommand(args);
+  }
   if (args.command === "session-list") {
     return runSessionList(args);
   }
@@ -142,11 +166,19 @@ function parseArgs(argv) {
     heartbeat_sec: 20,
     output: "text",
     quiet: false,
+    auth_base_url: authBaseUrl(),
+    email: null,
+    password: null,
+    token: null,
     _positionals: [],
   };
 
   if (argv.length >= 2 && argv[0] === "session" && ["list", "all"].includes(argv[1])) {
     args.command = "session-list";
+    argv = argv.slice(2);
+  }
+  if (argv.length >= 2 && argv[0] === "auth" && ["status", "token", "login", "register", "logout"].includes(argv[1])) {
+    args.command = `auth-${argv[1]}`;
     argv = argv.slice(2);
   }
 
@@ -164,6 +196,9 @@ function parseArgs(argv) {
     "--poll-interval-ms",
     "--heartbeat-sec",
     "--output",
+    "--email",
+    "--password",
+    "--token",
   ]);
   const boolFlags = new Set([
     "--prompt-stdin",
@@ -334,9 +369,170 @@ function setArg(args, flag, value) {
     case "--quiet":
       args.quiet = true;
       break;
+    case "--email":
+      args.email = value;
+      break;
+    case "--password":
+      args.password = value;
+      break;
+    case "--token":
+      args.token = value;
+      break;
     default:
       throw new Error(`unhandled option: ${flag}`);
   }
+}
+
+async function runAuthCommand(args) {
+  if (args.command === "auth-status") {
+    const source = currentTokenSource();
+    const store = loadAuthStore();
+    const result = {
+      token_configured: Boolean(source.token),
+      token_source: source.name || null,
+      token_sources_priority: ["TEDLINK_AUTH_TOKEN", "TEDLINK_TOKEN", "auth_store"],
+      auth_store: authStorePath(),
+      auth_base_url: args.auth_base_url,
+      stored_auth_base_url: store.auth_base_url,
+      user: store.user,
+      token: store.token_info,
+    };
+    if (args.output === "json") {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    if (source.token) {
+      console.log("TedLink token is configured");
+      console.log(`  source: ${source.name}`);
+      return;
+    }
+    console.log(missingTokenMessage());
+    return;
+  }
+
+  if (args.command === "auth-token") {
+    if (!args.token) {
+      throw new Error("auth token requires --token");
+    }
+    const store = saveExistingToken(args.token);
+    if (args.output === "json") {
+      console.log(JSON.stringify({ auth_store: authStorePath(), token: store.token_info }, null, 2));
+      return;
+    }
+    console.log("TedLink token stored");
+    console.log(`  auth store: ${authStorePath()}`);
+    return;
+  }
+
+  if (args.command === "auth-login") {
+    if (!args.email) {
+      throw new Error("auth login requires --email");
+    }
+    const password = await resolveAuthPassword(args);
+    const { store, token } = await loginAndCreateToken({
+      baseUrl: args.auth_base_url,
+      email: args.email,
+      password,
+    });
+    if (args.output === "json") {
+      console.log(JSON.stringify({
+        auth_store: authStorePath(),
+        user: store.user,
+        token: store.token_info,
+        plain_token: token,
+      }, null, 2));
+      return;
+    }
+    console.log("TedLink login succeeded; token created and stored");
+    console.log(`  auth store: ${authStorePath()}`);
+    console.log(`  token: ${token}`);
+    return;
+  }
+
+  if (args.command === "auth-register") {
+    if (!args.email) {
+      throw new Error("auth register requires --email");
+    }
+    const verification = await sendEmailVerification({ baseUrl: args.auth_base_url, email: args.email });
+    if (args.output === "json") {
+      console.log(JSON.stringify({ verification }, null, 2));
+      return;
+    }
+    console.log("TedLink registration started");
+    console.log(`  email: ${verification.email || args.email}`);
+    console.log("  next: wait for the registration email and follow the email instructions");
+    return;
+  }
+
+  if (args.command === "auth-logout") {
+    clearAuthStore();
+    if (args.output === "json") {
+      console.log(JSON.stringify({ cleared: true, auth_store: authStorePath() }, null, 2));
+      return;
+    }
+    console.log("TedLink stored token cleared");
+    console.log(`  auth store: ${authStorePath()}`);
+    return;
+  }
+
+  throw new Error(`unsupported auth command: ${args.command}`);
+}
+
+async function resolveAuthPassword(args = {}) {
+  const argumentValue = String(args.password || "").trim();
+  if (argumentValue) {
+    return argumentValue;
+  }
+  const configured = envValue("TEDLINK_PASSWORD");
+  if (configured) {
+    return configured;
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("auth login requires TEDLINK_PASSWORD in non-interactive environments");
+  }
+  return readSecretLine("TedLink password: ");
+}
+
+function readSecretLine(prompt) {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    const stdout = process.stdout;
+    const previousRawMode = stdin.isRaw;
+    let value = "";
+    stdout.write(prompt);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+
+    function cleanup() {
+      stdin.removeListener("data", onData);
+      stdin.setRawMode(Boolean(previousRawMode));
+      if (!previousRawMode) {
+        stdin.pause();
+      }
+      stdout.write("\n");
+    }
+
+    function onData(char) {
+      if (char === "\r" || char === "\n") {
+        cleanup();
+        resolve(value);
+        return;
+      }
+      if (char === "\u0003") {
+        cleanup();
+        reject(new Error("password prompt cancelled"));
+        return;
+      }
+      if (char === "\u007f" || char === "\b") {
+        value = value.slice(0, -1);
+        return;
+      }
+      value += char;
+    }
+
+    stdin.on("data", onData);
+  });
 }
 
 function envValue(name) {
@@ -1048,6 +1244,7 @@ module.exports = {
   resolveResumeSession,
   resumeWorkspaceDir,
   persistStatusSession,
+  runAuthCommand,
   resolvePrompt,
   currentUnixSecs,
 };

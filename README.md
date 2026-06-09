@@ -20,16 +20,17 @@ npm install -g ./skills/ted-link/tedlink-cli
 If the bundled source directory is unavailable, install the matching published CLI version:
 
 ```bash
-npm install -g tedlink-cli@1.6.0
+npm install -g tedlink-cli@1.6.1
 ```
 
 For users in China, use the npmmirror registry for that fallback:
 
 ```bash
-npm install -g tedlink-cli@1.6.0 --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@1.6.1 --registry=https://registry.npmmirror.com
 ```
 
 - Environment configured for the TedLink client (`TEDLINK_BASE_URL`)
+- Before TedLink is used through the skill, Claude must tell the user that `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from the user's system are sent to the TedLink server, and TedLink task execution consumes the user's token through those environment variables.
 
 ## Installation
 
