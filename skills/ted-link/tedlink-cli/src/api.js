@@ -283,6 +283,7 @@ function normalizeV3SessionStatus(value) {
       },
       metadata: {
         prompt_summary: value.prompt_summary || prompt,
+        result_slug: value.result_slug || "",
         server_context: value.context_info || {},
       },
     },

@@ -20,6 +20,7 @@ const {
   normalizeMacIdentity,
   resultOutputDir,
   sessionPromptSummary,
+  sessionResultSlug,
   unpackResultArchive,
   collectFiles,
   resolvePath,
@@ -577,6 +578,7 @@ async function runStatus(args, sessionId) {
     ? resolvePath(expanduserPath(args.output_dir))
     : resultOutputDir(
         workspaceDir,
+        sessionResultSlug(status),
         sessionPromptSummary(status),
         status.session.session_id,
       );
@@ -894,6 +896,7 @@ async function finishLocalSession(args, finalStatus, workspaceDir, sessionPath) 
     ? resolvePath(expanduserPath(args.output_dir))
     : resultOutputDir(
         workspaceDir,
+        sessionResultSlug(finalStatus),
         sessionPromptSummary(finalStatus),
         finalStatus.session.session_id,
       );

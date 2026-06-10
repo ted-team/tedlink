@@ -45,7 +45,7 @@ function unpackResultArchive(root, archive) {
       throw new Error("truncated tar archive");
     }
     if (typeflag === 0x30 || typeflag === 0) {
-      const relative = safeRelativePath(filePath);
+      const relative = stripArtifactsRoot(safeRelativePath(filePath));
       if (relative) {
         const target = path.join(root, relative);
         fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -53,7 +53,7 @@ function unpackResultArchive(root, archive) {
         written.push(relative.split(path.sep).join("/"));
       }
     } else if (typeflag === 0x35) {
-      const relative = safeRelativePath(filePath);
+      const relative = stripArtifactsRoot(safeRelativePath(filePath));
       if (relative) {
         fs.mkdirSync(path.join(root, relative), { recursive: true });
       }
@@ -67,8 +67,8 @@ function isGzipArchive(bytes) {
   return bytes && bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
-function resultOutputDir(workspaceDir, summary, sessionId) {
-  return path.join(workspaceDir, ".tedlink", resultFolderName(summary, sessionId));
+function resultOutputDir(workspaceDir, resultSlug, summary, sessionId) {
+  return path.join(workspaceDir, ".tedlink", resultFolderName(resultSlug, summary, sessionId));
 }
 
 function sessionPromptSummary(status) {
@@ -76,7 +76,16 @@ function sessionPromptSummary(status) {
   return String(metadata.prompt_summary || "");
 }
 
-function resultFolderName(summary, sessionId) {
+function sessionResultSlug(status) {
+  const metadata = status.session && status.session.metadata ? status.session.metadata : {};
+  return String(metadata.result_slug || "");
+}
+
+function resultFolderName(resultSlug, summary, sessionId) {
+  const sanitizedSlug = sanitizeResultFolderComponent(resultSlug);
+  if (sanitizedSlug) {
+    return sanitizedSlug;
+  }
   const sanitized = sanitizeResultFolderComponent(summary);
   if (sanitized) {
     return sanitized;
@@ -85,7 +94,7 @@ function resultFolderName(summary, sessionId) {
   if (!fallbackId) {
     return "tedlink-result";
   }
-  return `tedlink-${fallbackId}`;
+  return `tedlink_${fallbackId}`;
 }
 
 function sanitizeResultFolderComponent(value) {
@@ -93,25 +102,22 @@ function sanitizeResultFolderComponent(value) {
   let out = "";
   let lastWasSep = false;
   let count = 0;
+  const maxLength = 24;
   for (const ch of Array.from(text)) {
-    if (count >= 32) {
+    if (count >= maxLength) {
       break;
     }
     if (/^[A-Za-z0-9]$/.test(ch)) {
       out += ch.toLowerCase();
       lastWasSep = false;
       count += 1;
-    } else if (/\p{L}|\p{N}/u.test(ch)) {
-      out += ch;
-      lastWasSep = false;
-      count += 1;
     } else if (!lastWasSep && out.length > 0) {
-      out += "-";
+      out += "_";
       lastWasSep = true;
       count += 1;
     }
   }
-  return out.replace(/^-+|-+$/g, "");
+  return out.replace(/^_+|_+$/g, "");
 }
 
 function tarHeaderPath(header) {
@@ -149,6 +155,14 @@ function tarString(bytes) {
 function safeRelativePath(value) {
   const normalized = String(value || "").trim().replace(/\\/g, "/");
   const parts = normalized.split("/").filter((part) => part && part !== "." && part !== "..");
+  return parts.join(path.sep);
+}
+
+function stripArtifactsRoot(value) {
+  const parts = String(value || "").split(path.sep).filter(Boolean);
+  if (parts[0] === "artifacts") {
+    return parts.slice(1).join(path.sep);
+  }
   return parts.join(path.sep);
 }
 
@@ -294,6 +308,7 @@ module.exports = {
   unpackResultArchive,
   resultOutputDir,
   sessionPromptSummary,
+  sessionResultSlug,
   defaultUser,
   collectFiles,
   defaultMac,
@@ -304,5 +319,6 @@ module.exports = {
   resultFolderName,
   sanitizeResultFolderComponent,
   safeRelativePath,
+  stripArtifactsRoot,
   md5Hex,
 };

@@ -33,8 +33,11 @@ const {
 const pendingTests = [];
 
 runTest("sanitizes result folder names", () => {
-  assert.equal(sanitizeResultFolderComponent("五管OTA设计"), "五管ota设计");
-  assert.equal(resultOutputDir("/tmp/workspace", "五管OTA设计", "session-full-prompt"), "/tmp/workspace/.tedlink/五管ota设计");
+  assert.equal(sanitizeResultFolderComponent("Five transistor OTA design"), "five_transistor_ota_desi");
+  assert.equal(sanitizeResultFolderComponent("五管OTA设计"), "ota");
+  assert.equal(resultOutputDir("/tmp/workspace", "ota_gain60db_pm65", "五管OTA设计", "session-full-prompt"), "/tmp/workspace/.tedlink/ota_gain60db_pm65");
+  assert.equal(resultOutputDir("/tmp/workspace", "", "Five transistor OTA design", "session-full-prompt"), "/tmp/workspace/.tedlink/five_transistor_ota_desi");
+  assert.equal(resultOutputDir("/tmp/workspace", "", "五管设计", "session-full-prompt"), "/tmp/workspace/.tedlink/tedlink_session_full_prompt");
 });
 
 runTest("normalizes mac identity", () => {
@@ -76,8 +79,9 @@ runTest("unpacks tar archives safely", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-cli-"));
   const archive = testTarArchive([["artifacts/report.md", Buffer.from("ok")]]);
   const written = unpackResultArchive(root, archive);
-  assert.deepEqual(written, ["artifacts/report.md"]);
-  assert.equal(fs.readFileSync(path.join(root, "artifacts", "report.md"), "utf8"), "ok");
+  assert.deepEqual(written, ["report.md"]);
+  assert.equal(fs.readFileSync(path.join(root, "report.md"), "utf8"), "ok");
+  assert.equal(fs.existsSync(path.join(root, "artifacts")), false);
 });
 
 runTest("unpacks gzip tar archives from tedlink-server", () => {
@@ -112,6 +116,7 @@ runTest("normalizes staged executor history into activity", () => {
   const status = parseSessionStatusResponse(Buffer.from(JSON.stringify({
     session_id: "s1",
     status: "EXECUTING",
+    result_slug: "ota_gain60db_pm65",
     progress: 20,
     workspace_path: "/tmp/work",
     artifact_dir: "artifacts",
@@ -135,6 +140,7 @@ runTest("normalizes staged executor history into activity", () => {
       },
     ],
   })));
+  assert.equal(status.session.metadata.result_slug, "ota_gain60db_pm65");
   assert.deepEqual(status.activity.map((item) => item.action), ["plan", "task", "tool", "subtask", "completed"]);
   assert.match(status.activity[2].message, /下一轮增大尾电流/);
 });
