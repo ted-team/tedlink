@@ -1,6 +1,6 @@
 {
   "name": "tedlink-cli",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "TedLink CLI client for Node.js",
   "type": "commonjs",
   "main": "./src/main.js",
