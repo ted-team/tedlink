@@ -20,13 +20,13 @@ npm install -g ./skills/ted-link/tedlink-cli
 If the bundled source directory is unavailable, install the matching published CLI version:
 
 ```bash
-npm install -g tedlink-cli@1.6.1
+npm install -g tedlink-cli@1.6.2
 ```
 
 For users in China, use the npmmirror registry for that fallback:
 
 ```bash
-npm install -g tedlink-cli@1.6.1 --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@1.6.2 --registry=https://registry.npmmirror.com
 ```
 
 - Environment configured for the TedLink client (`TEDLINK_BASE_URL`)
