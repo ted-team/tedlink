@@ -2,7 +2,15 @@
 
 const fs = require("fs");
 const path = require("path");
-const { submitRequest, sessionStatus, downloadResultArchive } = require("./api");
+const {
+  submitRequest,
+  sessionStatus,
+  downloadResultArchive,
+  replySession,
+  recoverSession,
+  executeChat,
+  normalizeV3SubmitResponse,
+} = require("./api");
 const {
   authBaseUrl,
   authStorePath,
@@ -129,7 +137,7 @@ async function runCli(argv) {
     return withRunRecord(args, workspaceDir, "local", prompt, () => runLocalSession(args, prompt));
   }
   const workspaceDir = resolvePath(expanduserPath(args.dir));
-  if (fs.existsSync(localSessionPath(workspaceDir))) {
+  if (hasRecoverableLocalSession(workspaceDir)) {
     return withRunRecord(args, workspaceDir, "recover", null, () => runLocalSession(args, null));
   }
   throw new Error("missing prompt and no recoverable TedLink task in this directory");
@@ -730,8 +738,9 @@ function isServerWorkspaceDir(value) {
 async function runLocalSession(args, prompt) {
   const submittedAt = Date.now();
   const workspaceDir = resolvePath(expanduserPath(args.dir));
-  const sessionPath = localSessionPath(workspaceDir);
-  let localSession = await readLocalSession(sessionPath);
+  const sessionFile = await readLocalSessionFile(workspaceDir);
+  const sessionPath = sessionFile ? sessionFile.filePath : localSessionPath(workspaceDir);
+  let localSession = sessionFile ? sessionFile.session : null;
   if (localSession) {
     if (shouldStartNewLocalSession(args, prompt, localSession)) {
       if (prompt === null) {
@@ -825,33 +834,63 @@ async function submitLocalSession(args, prompt, workspaceDir, sessionPath, optio
   const sharedDir = args.shared_dir ? resolvePath(expanduserPath(args.shared_dir)) : null;
   const files = effectiveUploadWorkspace(args) ? collectFiles(workspaceDir) : [];
   const sharedFiles = sharedDir ? collectFiles(sharedDir) : [];
-  const session = await submitRequest(
-    args.decision_url,
-    prompt,
-    args.session_id,
-    user,
-    mac,
-    effectiveAutoPlan(args),
-    effectiveAutoDispatch(args),
-    effectiveDeliverResultFiles(args),
-    files,
-    sharedFiles,
-    String(workspaceDir),
-    false,
-    args.output === "text" && !args.quiet ? printStreamEvent : null,
-  );
+  let session;
+  let localSessionId;
+  let parentSessionId = "";
+  let legacyResumeFallback = false;
+  const onEvent = args.output === "text" && !args.quiet ? printStreamEvent : null;
+  if (options.resumeSession) {
+    parentSessionId = String(options.storedSession && options.storedSession.session_id || "").trim();
+    const resumeResult = await submitResumeFollowUpSession({
+      args,
+      prompt,
+      workspaceDir,
+      sessionPath,
+      user,
+      mac,
+      files,
+      sharedFiles,
+      onEvent,
+      parentSessionId,
+    });
+    session = resumeResult.session;
+    legacyResumeFallback = Boolean(resumeResult.legacyResumeFallback);
+    localSessionId = String(resumeResult.sessionId || "").trim() || session.session.session_id;
+  } else {
+    session = await submitRequest(
+      args.decision_url,
+      prompt,
+      args.session_id,
+      user,
+      mac,
+      effectiveAutoPlan(args),
+      effectiveAutoDispatch(args),
+      effectiveDeliverResultFiles(args),
+      files,
+      sharedFiles,
+      String(workspaceDir),
+      false,
+      onEvent,
+    );
+    localSessionId = session.session.session_id;
+  }
   const outputDir = args.output_dir
     ? String(resolvePath(expanduserPath(args.output_dir)))
     : null;
   const localSession = {
-    session_id: session.session.session_id,
+    session_id: localSessionId,
     prompt: options.initialPrompt || session.session.prompt,
     decision_url: args.decision_url,
     output_dir: outputDir,
     created_unix_secs: currentUnixSecs(),
   };
+  if (options.resumeSession && parentSessionId) {
+    if (!legacyResumeFallback) {
+      localSession.parent_session_id = parentSessionId;
+    }
+  }
   await writeLocalSession(sessionPath, localSession);
-  if (options.preservePromptSummary) {
+  if (options.preservePromptSummary && !options.resumeSession) {
     updateSessionRecord(session.session.session_id, {
       decision_url: args.decision_url,
       workspace_dir: String(workspaceDir),
@@ -861,6 +900,18 @@ async function submitLocalSession(args, prompt, workspaceDir, sessionPath, optio
       state: session.session.state,
       updated_at: new Date().toISOString(),
     });
+  } else if (!options.resumeSession || !parentSessionId || legacyResumeFallback) {
+    upsertSession(buildSessionRecord({
+      sessionId: session.session.session_id,
+      prompt: session.session.prompt,
+      decisionUrl: args.decision_url,
+      workspaceDir: String(workspaceDir),
+      outputDir,
+      user,
+      mac,
+      parentSessionId: "",
+      state: session.session.state,
+    }));
   } else {
     upsertSession(buildSessionRecord({
       sessionId: session.session.session_id,
@@ -870,6 +921,7 @@ async function submitLocalSession(args, prompt, workspaceDir, sessionPath, optio
       outputDir,
       user,
       mac,
+      parentSessionId,
       state: session.session.state,
     }));
   }
@@ -884,11 +936,104 @@ async function submitLocalSession(args, prompt, workspaceDir, sessionPath, optio
       error: "",
     };
     printLocalSummary(options.initialPrompt || session.session.prompt, initialStatus, Date.now());
-    console.log(options.resumeSession ? "TedLink follow-up sent" : "TedLink task started");
+    if (options.resumeSession && !legacyResumeFallback && parentSessionId) {
+      console.log("TedLink follow-up sent");
+      console.log(`  session: ${localSessionId}`);
+      console.log(`  parent: ${parentSessionId}`);
+    } else {
+      console.log(options.resumeSession ? "TedLink follow-up sent" : "TedLink task started");
+    }
     console.log("Polling every 5 seconds. If this process is interrupted, run tedlink again in this directory to continue.");
     console.log();
   }
   return localSession;
+}
+
+async function submitResumeFollowUpSession({
+  args,
+  prompt,
+  workspaceDir,
+  sessionPath,
+  user,
+  mac,
+  files,
+  sharedFiles,
+  onEvent,
+  parentSessionId,
+}) {
+  try {
+    const reply = await replySession(args.decision_url, parentSessionId, user, mac, prompt);
+    const childSessionId = extractReplySessionId(reply);
+    await writeLocalSession(sessionPath, {
+      session_id: childSessionId,
+      prompt,
+      decision_url: args.decision_url,
+      created_unix_secs: currentUnixSecs(),
+      parent_session_id: parentSessionId,
+    });
+    const streamEvents = await executeChat(
+      args.decision_url,
+      childSessionId,
+      prompt,
+      envValue("ANTHROPIC_AUTH_TOKEN") || envValue("ANTHROPIC_API_KEY") || undefined,
+      envValue("ANTHROPIC_BASE_URL") || undefined,
+      envValue("ANTHROPIC_MODEL") || "claude-sonnet-4-6",
+      null,
+      onEvent,
+    );
+    return {
+      session: normalizeV3SubmitResponse({
+        session_id: childSessionId,
+        prompt,
+        local_workspace_dir: String(workspaceDir),
+      }, streamEvents),
+      sessionId: childSessionId,
+      legacyResumeFallback: false,
+    };
+  } catch (err) {
+    if (!isMissingReplyEndpointError(err)) {
+      throw err;
+    }
+    const session = await submitRequest(
+      args.decision_url,
+      prompt,
+      parentSessionId,
+      user,
+      mac,
+      effectiveAutoPlan(args),
+      effectiveAutoDispatch(args),
+      effectiveDeliverResultFiles(args),
+      files,
+      sharedFiles,
+      String(workspaceDir),
+      false,
+      onEvent,
+    );
+    await writeLocalSession(sessionPath, {
+      session_id: parentSessionId,
+      prompt,
+      decision_url: args.decision_url,
+      created_unix_secs: currentUnixSecs(),
+    });
+    return { session, sessionId: parentSessionId, legacyResumeFallback: true };
+  }
+}
+
+function extractReplySessionId(reply) {
+  const candidate = reply && (reply.session_id || (reply.session && reply.session.session_id));
+  const sessionId = String(candidate || "").trim();
+  if (!sessionId) {
+    throw new Error("TedLink reply failed: missing session_id in response");
+  }
+  return sessionId;
+}
+
+function isMissingReplyEndpointError(err) {
+  const message = String(err && err.message ? err.message : err || "");
+  if (/HTTP\s+(404|405)\b/i.test(message)) {
+    return true;
+  }
+  return /(endpoint|route|path).*(not found|missing|does not exist|unavailable)/i.test(message);
 }
 
 async function finishLocalSession(args, finalStatus, workspaceDir, sessionPath) {
@@ -1095,7 +1240,27 @@ function printStreamSection(section) {
 }
 
 function localSessionPath(workspaceDir) {
+  return path.join(workspaceDir, TEDLINK_DIR_NAME, SESSION_FILE_NAME);
+}
+
+function legacyLocalSessionPath(workspaceDir) {
   return path.join(workspaceDir, SESSION_FILE_NAME);
+}
+
+function hasRecoverableLocalSession(workspaceDir) {
+  return fs.existsSync(localSessionPath(workspaceDir)) || fs.existsSync(legacyLocalSessionPath(workspaceDir));
+}
+
+async function readLocalSessionFile(workspaceDir) {
+  const currentPath = localSessionPath(workspaceDir);
+  if (fs.existsSync(currentPath)) {
+    return { filePath: currentPath, session: await readLocalSession(currentPath) };
+  }
+  const legacyPath = legacyLocalSessionPath(workspaceDir);
+  if (fs.existsSync(legacyPath)) {
+    return { filePath: legacyPath, session: await readLocalSession(legacyPath) };
+  }
+  return null;
 }
 
 async function withRunRecord(args, workspaceDir, mode, prompt, fn) {

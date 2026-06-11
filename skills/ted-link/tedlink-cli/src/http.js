@@ -204,6 +204,7 @@ function envValue(name) {
 
 module.exports = {
   httpRequest,
+  httpRequestRaw,
   httpStreamSseEvents,
   parseUrl,
   authTokenFromEnv,

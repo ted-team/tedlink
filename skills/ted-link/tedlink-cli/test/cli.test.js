@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert").strict;
+const http = require("http");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -15,6 +16,7 @@ const { isTerminalSessionState, isPauseSessionState } = require("../src/flow");
 const {
   createRunRecord,
   parseArgs,
+  runCli,
   persistStatusSession,
   resolveResumeSession,
   resumeWorkspaceDir,
@@ -259,6 +261,176 @@ runTest("persists session list records with prompt summaries", () => {
   assert.equal(sessions[0].prompt_summary, promptSummary(record.prompt));
 });
 
+runTest("resumes follow-up by replying then executing child session", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-home-"));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-work-"));
+  const previousHome = process.env.TEDLINK_HOME;
+  const previousBase = process.env.TEDLINK_BASE_URL;
+  process.env.TEDLINK_HOME = root;
+  const state = {
+    replyCalls: 0,
+    recoverCalls: 0,
+    executeCalls: [],
+  };
+  let sessionPath = "";
+  const server = await createMockServer(async (req, body) => {
+    if (req.url === "/api/v3/session/reply") {
+      state.replyCalls += 1;
+      assert.equal(req.method, "POST");
+      const payload = JSON.parse(body);
+      assert.equal(payload.parent_session_id, "parent-1");
+      assert.equal(payload.initial_prompt, "继续优化");
+      return jsonResponse(200, {
+        session_id: "child-1",
+        parent_session_id: "parent-1",
+        initial_prompt: "继续优化",
+      });
+    }
+    if (req.url === "/api/v3/execute/chat") {
+      state.executeCalls.push(JSON.parse(body));
+      assert.equal(JSON.parse(body).session_id, "child-1");
+      return sseResponse([
+        { event: "status_update", status: "completed", progress: 100 },
+      ]);
+    }
+    if (req.url === "/api/v3/session/recover") {
+      state.recoverCalls += 1;
+      return jsonResponse(200, {
+        session_id: "child-1",
+        status: "COMPLETED",
+        initial_prompt: "继续优化",
+        prompt_summary: "继续优化",
+        result_slug: "child-1",
+      });
+    }
+    throw new Error(`unexpected request: ${req.method} ${req.url}`);
+  });
+  process.env.TEDLINK_BASE_URL = server.url;
+  try {
+    upsertSession(buildSessionRecord({
+      sessionId: "parent-1",
+      prompt: "原始任务",
+      decisionUrl: server.url,
+      workspaceDir: work,
+      updatedAt: "2026-06-11T00:00:00.000Z",
+    }));
+    sessionPath = path.join(work, ".tedlink", ".session");
+    const lines = [];
+    const originalLog = console.log;
+    console.log = (line) => lines.push(String(line));
+    try {
+      await runCli(["--resume", "parent-1", "--prompt", "继续优化", "--dir", work, "--quiet"]);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(state.replyCalls, 1);
+    assert.equal(state.executeCalls.length, 1);
+    assert.equal(state.recoverCalls >= 1, true);
+    const sessions = listSessions();
+    const child = sessions.find((item) => item.session_id === "child-1");
+    assert.equal(child.parent_session_id, "parent-1");
+  } finally {
+    await server.close();
+    restoreEnv("TEDLINK_HOME", previousHome);
+    restoreEnv("TEDLINK_BASE_URL", previousBase);
+  }
+});
+
+runTest("falls back to recover and execute parent session when reply endpoint is missing", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-home-"));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-work-"));
+  const previousHome = process.env.TEDLINK_HOME;
+  const previousBase = process.env.TEDLINK_BASE_URL;
+  process.env.TEDLINK_HOME = root;
+  const state = {
+    replyCalls: 0,
+    recoverCalls: 0,
+    executeCalls: [],
+  };
+  let sessionPath = "";
+  let sessionWritten = false;
+  const originalWriteFileSync = fs.writeFileSync;
+  fs.writeFileSync = function patchedWriteFileSync(filePath, data, options) {
+    if (String(path.resolve(filePath)) === String(path.resolve(sessionPath))) {
+      sessionWritten = true;
+    }
+    return originalWriteFileSync.call(fs, filePath, data, options);
+  };
+  const server = await createMockServer(async (req, body) => {
+    if (req.url === "/api/v3/session/reply") {
+      state.replyCalls += 1;
+      return jsonResponse(404, { error: "endpoint not found" });
+    }
+    if (req.url === "/api/v3/session/recover") {
+      state.recoverCalls += 1;
+      const count = state.recoverCalls;
+      if (count === 1) {
+        return jsonResponse(200, { session_id: "parent-2" });
+      }
+      return jsonResponse(200, {
+        session_id: "parent-2",
+        status: "COMPLETED",
+        initial_prompt: "原始任务",
+        prompt_summary: "原始任务",
+      });
+    }
+    if (req.url === "/api/v3/execute/chat") {
+      state.executeCalls.push(JSON.parse(body));
+      assert.equal(JSON.parse(body).session_id, "parent-2");
+      return sseResponse([
+        { event: "status_update", status: "completed", progress: 100 },
+      ]);
+    }
+    throw new Error(`unexpected request: ${req.method} ${req.url}`);
+  });
+  process.env.TEDLINK_BASE_URL = server.url;
+  try {
+    upsertSession(buildSessionRecord({
+      sessionId: "parent-2",
+      prompt: "原始任务",
+      decisionUrl: server.url,
+      workspaceDir: work,
+      updatedAt: "2026-06-11T00:00:00.000Z",
+    }));
+    sessionPath = path.join(work, ".tedlink", ".session");
+    try {
+      await runCli(["--resume", "parent-2", "--prompt", "继续优化", "--dir", work, "--quiet"]);
+    } finally {}
+    assert.equal(state.replyCalls, 1);
+    assert.equal(state.executeCalls.length >= 1, true);
+    assert.equal(state.executeCalls[0].session_id, "parent-2");
+  } finally {
+    await server.close();
+    restoreEnv("TEDLINK_HOME", previousHome);
+    restoreEnv("TEDLINK_BASE_URL", previousBase);
+  }
+});
+
+runTest("reads old sessions.json without parent_session_id", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-store-old-"));
+  const storePath = path.join(root, "sessions.json");
+  fs.writeFileSync(storePath, JSON.stringify({
+    version: 1,
+    sessions: [
+      {
+        session_id: "old-1",
+        prompt: "旧任务",
+        decision_url: "http://server",
+        workspace_dir: "/tmp/work",
+        user: "u",
+        mac: "m",
+        state: "completed",
+        created_at: "2026-06-01T00:00:00.000Z",
+        updated_at: "2026-06-01T00:00:00.000Z",
+      },
+    ],
+  }, null, 2));
+  const sessions = listSessions(storePath);
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].parent_session_id, "");
+  assert.equal(findSession("old-1", storePath).parent_session_id, "");
+});
+
 runTest("resolves latest resume session from TEDLINK_HOME", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-home-"));
   const previousHome = process.env.TEDLINK_HOME;
@@ -491,4 +663,55 @@ function testTarArchive(entries) {
   }
   parts.push(Buffer.alloc(1024));
   return Buffer.concat(parts);
+}
+
+function createMockServer(handler) {
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", async () => {
+      try {
+        const body = Buffer.concat(chunks).toString("utf8");
+        const result = await handler(req, body);
+        if (result && result.kind === "sse") {
+          res.statusCode = result.statusCode || 200;
+          res.setHeader("Content-Type", "text/event-stream");
+          res.end(result.body);
+          return;
+        }
+        res.statusCode = (result && result.statusCode) || 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end((result && result.body) || "{}");
+      } catch (err) {
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: err.message || String(err) }));
+      }
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolve({
+        url: `http://127.0.0.1:${address.port}`,
+        close: () => new Promise((done) => server.close(done)),
+      });
+    });
+  });
+}
+
+function jsonResponse(statusCode, value) {
+  return {
+    statusCode,
+    body: JSON.stringify(value),
+  };
+}
+
+function sseResponse(events) {
+  const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+  return {
+    kind: "sse",
+    statusCode: 200,
+    body,
+  };
 }

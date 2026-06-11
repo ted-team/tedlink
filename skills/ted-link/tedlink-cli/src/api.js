@@ -1,6 +1,6 @@
 "use strict";
 
-const { httpRequest, httpStreamSseEvents } = require("./http");
+const { httpRequest, httpRequestRaw, httpStreamSseEvents } = require("./http");
 const {
   normalizeRequestResponse,
   normalizeSessionStatus,
@@ -54,6 +54,23 @@ function submitRequest(
         ...payload,
         session_id: session.session_id,
       }, streamEvents)));
+}
+
+async function replySession(decisionUrl, parentSessionId, user, mac, prompt) {
+  const payload = {
+    parent_session_id: parentSessionId,
+    mac_address: mac,
+    username: user,
+    initial_prompt: prompt,
+  };
+  const response = await httpRequestRaw(
+    decisionUrl,
+    "POST",
+    "/api/v3/session/reply",
+    "application/json",
+    Buffer.from(JSON.stringify(payload)),
+  );
+  return parseJsonResponse("/api/v3/session/reply")(response.body);
 }
 
 function buildSubmitPayload(
@@ -460,6 +477,7 @@ module.exports = {
   buildSubmitPayload: buildSubmitPayloadForTest,
   createSession,
   recoverSession,
+  replySession,
   executeChat,
   parseSseEvents,
   normalizeV3SubmitResponse,
