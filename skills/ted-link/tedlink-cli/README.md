@@ -19,6 +19,12 @@ export ANTHROPIC_MODEL=claude-sonnet-4-6
 ./src/main.js --prompt "run simulation" --dir .
 ```
 
+Attach local files or directories to the TedLink session workspace before submitting the prompt:
+
+```bash
+./src/main.js --prompt "run simulation" --fpath ./input.sp --fpath ./references --dir .
+```
+
 When TedLink is used through the skill, Claude must tell the user that `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` are sent to the TedLink server, and task execution consumes the user's token through those environment variables. The CLI itself does not prompt for `[y/N]` confirmation.
 
 List locally recorded sessions:
@@ -63,6 +69,7 @@ Equivalent explicit local all-sessions command:
 The client uses:
 
 - `POST /api/v3/session/create`
+- `POST /api/v3/session/upload-tar-gz`
 - `POST /api/v3/execute/chat`
 - `POST /api/v3/session/recover`
 - `GET /api/v3/sync/download`

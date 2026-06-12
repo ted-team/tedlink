@@ -2,6 +2,7 @@
 
 const assert = require("assert").strict;
 const fs = require("fs");
+const http = require("http");
 const os = require("os");
 const path = require("path");
 const zlib = require("zlib");
@@ -9,7 +10,8 @@ const zlib = require("zlib");
 const { sanitizeResultFolderComponent, resultOutputDir, unpackResultArchive, normalizeMacIdentity } = require("../src/output");
 const { renderStatusLine } = require("../src/status");
 const { taskLine } = require("../src/tasks");
-const { buildSubmitPayload, parseSubmitResponse, parseSseEvents, normalizeV3SubmitResponse } = require("../src/api");
+const { buildSubmitPayload, parseSubmitResponse, parseSseEvents, normalizeV3SubmitResponse, submitRequest } = require("../src/api");
+const { createTarGzArchive } = require("../src/archive");
 const { authTokenFromEnv } = require("../src/http");
 const { isTerminalSessionState, isPauseSessionState } = require("../src/flow");
 const {
@@ -240,6 +242,126 @@ runTest("parses resume flag with optional session id", () => {
   args = parseArgs(["--resume=s2", "--prompt", "继续优化"]);
   assert.equal(args.resume, true);
   assert.equal(args.resume_session_id, "s2");
+});
+
+runTest("parses fpath option", () => {
+  const args = parseArgs([
+    "--prompt",
+    "run",
+    "--fpath",
+    "input.txt",
+    "--fpath=docs",
+  ]);
+  assert.deepEqual(args.fpaths, ["input.txt", "docs"]);
+});
+
+runTest("creates tar gz archive from fpath files and directories", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-fpath-"));
+  fs.writeFileSync(path.join(root, "notes.txt"), "note");
+  fs.mkdirSync(path.join(root, "project"));
+  fs.writeFileSync(path.join(root, "project", "README.md"), "readme");
+  const archive = createTarGzArchive([
+    path.join(root, "notes.txt"),
+    path.join(root, "project"),
+  ]);
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-fpath-out-"));
+  const written = unpackResultArchive(out, archive);
+  assert.deepEqual(written, ["notes.txt", "project/README.md"]);
+  assert.equal(fs.readFileSync(path.join(out, "notes.txt"), "utf8"), "note");
+  assert.equal(fs.readFileSync(path.join(out, "project", "README.md"), "utf8"), "readme");
+});
+
+runTest("uploads fpath tar gz archive before executing prompt", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-upload-"));
+  const inputPath = path.join(root, "input.txt");
+  const docsPath = path.join(root, "docs");
+  fs.writeFileSync(inputPath, "input-content");
+  fs.mkdirSync(docsPath);
+  fs.writeFileSync(path.join(docsPath, "README.md"), "docs-content");
+  const previousAuth = process.env.TEDLINK_AUTH_TOKEN;
+  process.env.TEDLINK_AUTH_TOKEN = "upload-token";
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      const bodyText = body.toString("latin1");
+      seen.push(req.url);
+      try {
+        assert.equal(req.headers.authorization, "Bearer upload-token");
+        if (req.url === "/api/v3/session/create") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ session_id: "s-upload" }));
+          return;
+        }
+        if (req.url === "/api/v3/session/upload-tar-gz?session_id=s-upload") {
+          assert.match(String(req.headers["content-type"] || ""), /^multipart\/form-data; boundary=/);
+          assert.match(bodyText, /name="archive"; filename="tedlink-input\.tar\.gz"/);
+          const uploadedArchive = multipartArchiveContent(body);
+          const uploadedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tedlink-uploaded-"));
+          assert.deepEqual(unpackResultArchive(uploadedRoot, uploadedArchive), [
+            "input.txt",
+            "docs/README.md",
+          ]);
+          assert.equal(fs.readFileSync(path.join(uploadedRoot, "input.txt"), "utf8"), "input-content");
+          assert.equal(fs.readFileSync(path.join(uploadedRoot, "docs", "README.md"), "utf8"), "docs-content");
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            session_id: "s-upload",
+            owner_user_id: "u1",
+            uploaded_paths: ["./input.txt", "./docs/"],
+            extracted_file_count: 2,
+            extracted_dir_count: 1,
+          }));
+          return;
+        }
+        if (req.url === "/api/v3/execute/chat") {
+          assert.deepEqual(seen, [
+            "/api/v3/session/create",
+            "/api/v3/session/upload-tar-gz?session_id=s-upload",
+            "/api/v3/execute/chat",
+          ]);
+          res.setHeader("Content-Type", "text/event-stream");
+          res.end('data: {"event":"status_update","status":"COMPLETED"}\n\n');
+          return;
+        }
+        res.statusCode = 404;
+        res.end("not found");
+      } catch (err) {
+        res.statusCode = 500;
+        res.end(err && err.stack ? err.stack : String(err));
+      }
+    });
+  });
+  try {
+    const decisionUrl = await listenUrl(server);
+    const result = await submitRequest(
+      decisionUrl,
+      "prompt",
+      null,
+      "user",
+      "mac",
+      true,
+      true,
+      true,
+      [],
+      [],
+      root,
+      false,
+      null,
+      [inputPath, docsPath],
+    );
+    assert.equal(result.session.session_id, "s-upload");
+    assert.deepEqual(seen, [
+      "/api/v3/session/create",
+      "/api/v3/session/upload-tar-gz?session_id=s-upload",
+      "/api/v3/execute/chat",
+    ]);
+  } finally {
+    restoreEnv("TEDLINK_AUTH_TOKEN", previousAuth);
+    await closeServer(server);
+  }
 });
 
 runTest("persists session list records with prompt summaries", () => {
@@ -491,4 +613,35 @@ function testTarArchive(entries) {
   }
   parts.push(Buffer.alloc(1024));
   return Buffer.concat(parts);
+}
+
+function listenUrl(server) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function multipartArchiveContent(body) {
+  const contentStartMarker = Buffer.from("\r\n\r\n");
+  const contentStart = body.indexOf(contentStartMarker);
+  assert.notEqual(contentStart, -1);
+  const contentEnd = body.lastIndexOf(Buffer.from("\r\n--"));
+  assert.ok(contentEnd > contentStart);
+  return body.subarray(contentStart + contentStartMarker.length, contentEnd);
 }

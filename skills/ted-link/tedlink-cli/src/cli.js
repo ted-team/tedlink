@@ -71,6 +71,7 @@ Options:
   --prompt-stdin
   --dir <PATH>
   --shared-dir <PATH>
+  --fpath <PATH>
   --output-dir <PATH>
   --session-id <SESSION_ID>
   --resume [SESSION_ID]
@@ -144,6 +145,7 @@ function parseArgs(argv) {
     prompt_stdin: false,
     dir: ".",
     shared_dir: null,
+    fpaths: [],
     output_dir: null,
     session_id: null,
     resume: false,
@@ -188,6 +190,7 @@ function parseArgs(argv) {
     "--prompt-file",
     "--dir",
     "--shared-dir",
+    "--fpath",
     "--output-dir",
     "--session-id",
     "--status",
@@ -300,6 +303,9 @@ function setArg(args, flag, value) {
       break;
     case "--shared-dir":
       args.shared_dir = value;
+      break;
+    case "--fpath":
+      args.fpaths.push(value);
       break;
     case "--output-dir":
       args.output_dir = value;
@@ -561,6 +567,11 @@ function effectiveUploadWorkspace(args) {
   return args.upload_workspace && !args.no_upload_workspace;
 }
 
+function resolveFpaths(fpaths) {
+  return (Array.isArray(fpaths) ? fpaths : [])
+    .map((filePath) => resolvePath(expanduserPath(filePath)));
+}
+
 async function runStatus(args, sessionId) {
   const mac = normalizeMacIdentity(args.mac || defaultMac());
   let status = await sessionStatus(
@@ -619,6 +630,7 @@ async function runSubmitOnly(args, prompt) {
     String(workspaceDir),
     false,
     args.output === "text" && !args.quiet ? printStreamEvent : null,
+    resolveFpaths(args.fpaths),
   );
   const initialStatus = {
     session: { ...session.session },
@@ -839,6 +851,7 @@ async function submitLocalSession(args, prompt, workspaceDir, sessionPath, optio
     String(workspaceDir),
     false,
     args.output === "text" && !args.quiet ? printStreamEvent : null,
+    resolveFpaths(args.fpaths),
   );
   const outputDir = args.output_dir
     ? String(resolvePath(expanduserPath(args.output_dir)))
@@ -1244,6 +1257,7 @@ module.exports = {
   runId,
   normalizePromptForReuse,
   shouldStartNewLocalSession,
+  resolveFpaths,
   resolveResumeSession,
   resumeWorkspaceDir,
   persistStatusSession,

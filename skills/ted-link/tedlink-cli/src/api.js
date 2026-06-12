@@ -1,6 +1,7 @@
 "use strict";
 
 const { httpRequest, httpStreamSseEvents } = require("./http");
+const { createTarGzArchive } = require("./archive");
 const {
   normalizeRequestResponse,
   normalizeSessionStatus,
@@ -8,7 +9,7 @@ const {
   normalizeWorkspaceInfo,
 } = require("./models");
 
-function submitRequest(
+async function submitRequest(
   decisionUrl,
   prompt,
   sessionId,
@@ -22,6 +23,7 @@ function submitRequest(
   localWorkspaceDir,
   clientHeartbeatRequired,
   onEvent = null,
+  uploadFpaths = [],
 ) {
   const payload = buildSubmitPayload(
     prompt,
@@ -36,24 +38,26 @@ function submitRequest(
     localWorkspaceDir,
     clientHeartbeatRequired,
   );
-  const sessionPromise = sessionId
+  const session = await (sessionId
     ? recoverSession(decisionUrl, sessionId, mac)
-    : createSession(decisionUrl, user, mac, prompt);
-  return sessionPromise
-    .then((session) => executeChat(
-      decisionUrl,
-      session.session_id,
-      prompt,
-      payload.api_key,
-      payload.base_url,
-      payload.model,
-      null,
-      onEvent,
-    )
-      .then((streamEvents) => normalizeV3SubmitResponse({
-        ...payload,
-        session_id: session.session_id,
-      }, streamEvents)));
+    : createSession(decisionUrl, user, mac, prompt));
+  if (uploadFpaths.length > 0) {
+    await uploadFpathsArchive(decisionUrl, session.session_id, uploadFpaths);
+  }
+  const streamEvents = await executeChat(
+    decisionUrl,
+    session.session_id,
+    prompt,
+    payload.api_key,
+    payload.base_url,
+    payload.model,
+    null,
+    onEvent,
+  );
+  return normalizeV3SubmitResponse({
+    ...payload,
+    session_id: session.session_id,
+  }, streamEvents);
 }
 
 function buildSubmitPayload(
@@ -128,6 +132,53 @@ function recoverSession(decisionUrl, sessionId, mac) {
     "application/json",
     Buffer.from(JSON.stringify({ session_id: sessionId, mac_address: mac })),
   ).then(parseJsonResponse("/api/v3/session/recover"));
+}
+
+function uploadFpathsArchive(decisionUrl, sessionId, fpaths) {
+  const archive = createTarGzArchive(fpaths);
+  return uploadTarGzArchiveBuffer(decisionUrl, sessionId, "tedlink-input.tar.gz", archive);
+}
+
+function uploadTarGzArchiveBuffer(decisionUrl, sessionId, fileName, archive) {
+  const boundary = multipartBoundary();
+  const body = multipartFileBody({
+    boundary,
+    fieldName: "archive",
+    fileName,
+    contentType: "application/gzip",
+    content: archive,
+  });
+  return httpRequest(
+    decisionUrl,
+    "POST",
+    `/api/v3/session/upload-tar-gz?session_id=${encodeURIComponent(sessionId)}`,
+    `multipart/form-data; boundary=${boundary}`,
+    body,
+  ).then(parseJsonResponse("/api/v3/session/upload-tar-gz"));
+}
+
+function multipartBoundary() {
+  return `tedlink-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function multipartFileBody({ boundary, fieldName, fileName, contentType, content }) {
+  const safeFieldName = escapeMultipartHeaderValue(fieldName);
+  const safeFileName = escapeMultipartHeaderValue(fileName);
+  return Buffer.concat([
+    Buffer.from([
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="${safeFieldName}"; filename="${safeFileName}"`,
+      `Content-Type: ${contentType}`,
+      "",
+      "",
+    ].join("\r\n")),
+    Buffer.from(content),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+}
+
+function escapeMultipartHeaderValue(value) {
+  return String(value || "").replace(/["\r\n]/g, "_");
 }
 
 async function executeChat(
@@ -460,6 +511,9 @@ module.exports = {
   buildSubmitPayload: buildSubmitPayloadForTest,
   createSession,
   recoverSession,
+  uploadFpathsArchive,
+  uploadTarGzArchiveBuffer,
+  multipartFileBody,
   executeChat,
   parseSseEvents,
   normalizeV3SubmitResponse,

@@ -1,7 +1,7 @@
 ---
 name: ted-link
 description: 通过本地捆绑的 tedlink 客户端使用 TED，处理耗时较长但体验接近本地执行的电路设计任务。适用于模拟/混合信号电路设计、原理图/网表/仿真/报告生成、器件尺寸设计、拓扑探索，或用户明确要求使用 TED、TedLink、tedlink 的场景。
-version: 1.6.2
+version: 1.6.3
 scope: client
 argument-hint: --prompt "task" [--dir PATH]
 ---
@@ -16,9 +16,9 @@ argument-hint: --prompt "task" [--dir PATH]
 
 | 组件 | 版本 | 绑定说明 |
 | --- | --- | --- |
-| `ted-link` skill (`SKILL.md`) | `1.6.2` | 在本文件 frontmatter 中声明，并与 TedLink 插件发布版本保持一致。 |
-| TedLink plugin (`.claude-plugin/plugin.json`) | `1.6.2` | 携带此技能的插件包版本。 |
-| TedLink CLI (`tedlink --version`) | `1.6.2` | 此技能工作流所针对的捆绑客户端源码版本。 |
+| `ted-link` skill (`SKILL.md`) | `1.6.3` | 在本文件 frontmatter 中声明，并与 TedLink 插件发布版本保持一致。 |
+| TedLink plugin (`.claude-plugin/plugin.json`) | `1.6.3` | 携带此技能的插件包版本。 |
+| TedLink CLI (`tedlink --version`) | `1.6.3` | 此技能工作流所针对的捆绑客户端源码版本。 |
 
 当 skill/plugin 版本或 TedLink CLI 版本发生变化时，都要更新此表。版本不匹配意味着本技能中的说明可能不再符合已安装客户端的行为。
 
@@ -39,13 +39,13 @@ npm install -g ./skills/ted-link/tedlink-cli
 只有当捆绑源码目录不可用时，才安装匹配的已发布 CLI 版本：
 
 ```bash
-npm install -g tedlink-cli@1.6.2
+npm install -g tedlink-cli@1.6.3
 ```
 
 中国用户在 fallback 安装时使用 npmmirror registry：
 
 ```bash
-npm install -g tedlink-cli@1.6.2 --registry=https://registry.npmmirror.com
+npm install -g tedlink-cli@1.6.3 --registry=https://registry.npmmirror.com
 ```
 
 本地或 npm 包会安装 `tedlink` 可执行文件。始终从 `PATH` 运行 `tedlink`；不要查找 `skills/ted-link/bin/tedlink`、`skills/ted-link/bin/tedlink-osx` 或任何其他二进制路径。
@@ -101,7 +101,7 @@ tedlink auth logout
 - 工艺、器件模型、电源电压、温度、输入共模范围、输出摆幅、负载和工作 corner 预期
 - 关键性能指标，例如 DC 增益、带宽/UGB、相位裕度、压摆率、噪声、失调、CMRR/PSRR、功耗、面积、建立时间、线性度或效率
 - 所需仿真和交付物。默认只交付仿真网表和波形图；报告、尺寸表、额外分析表格或其他交付物只有在用户明确要求时才加入
-- 工作区处理方式，包括是否用 `--upload-workspace` 上传当前文件、是否使用特定 `--dir`，以及是否用 `--new` 开始全新运行
+- 工作区处理方式，包括是否用 `--upload-workspace` 上传当前文件、是否使用特定 `--dir`、用户明确提到的本地文件或文件夹是否应通过 `--fpath` 传入，以及是否用 `--new` 开始全新运行
 
 如果用户没有提供足够指标，应提出常见默认值并让用户确认或修改。例如，对于没有约束的一般 OTA 请求，可以建议默认值：180 nm CMOS、`VDD=1.8 V`、`temperature=27 C`、`load=1 pF`、`DC gain>=60 dB`、`UGB>=10 MHz`、`phase margin>=60 deg`、`power<=1 mW`，默认交付仿真网表和波形图，不交付报告、尺寸表或其他额外内容。应根据电路类型和用户上下文调整默认值，不要把 OTA 专用值强加给无关电路。
 
@@ -179,7 +179,7 @@ tedlink --prompt-file request.md --dir .
 
 7. TedLink 运行期间，只要 phase、活跃 todo/subtask、有用活动行、生成文件列表或终止状态发生变化，就发送前台进度消息。在长时间安静期间，也至少每 60 秒发送一次简短进度消息，基于最近 stdout 状态。如果没有变化，就说明 TedLink 仍在工作，并指出最后已知 phase 或活跃项。
 
-8. 不要运行前台轮询探测，例如 `sleep 30 && tedlink --status ...`、重复一次性状态命令或重复读取日志。保持一个命令连接到 TedLink stdout 监听器，并只用 assistant 消息总结 TedLink 进展。
+8. 不要运行前台轮询探测，例如先等待再查询状态的写法（Unix 下的 `sleep 30 && tedlink --status ...`、Windows 下的 `timeout /t 30` 或 `Start-Sleep 30` 再接状态命令）、重复一次性状态命令或重复读取日志。保持一个命令连接到 TedLink stdout 监听器，并只用 assistant 消息总结 TedLink 进展。
 
 9. 如果 stdout 监听器被中断，且无法恢复正在运行的 shell session，则从当前工作区继续仍在运行的现有任务：
 
@@ -252,6 +252,7 @@ TED 任务可能超过 15 分钟。不要把长时间运行但尚未结束的任
 
 - `--dir PATH`：本地工作区目录；默认是 `.`。
 - `--shared-dir PATH`：启动任务时作为共享输入发送的额外文件。
+- `--fpath PATH`：有文件上传需求时指定本地文件或文件夹；用户明确提到本地文件、文件夹或路径时优先用它；可重复传多个。
 - `--output-dir PATH`：返回的结果文件写入位置。
 - `--session-id ID`：启动时复用或命名任务 session。
 - `--resume [SESSION_ID]`：继续现有 TedLink session，用于后续调整。使用当前 Claude 对话中的明确 session ID，或用户明确选择的历史 session。
